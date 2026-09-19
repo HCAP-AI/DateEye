@@ -1,0 +1,8 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "dateeye",
+  "main": "worker/index.ts",
+  "compatibility_date": "2025-10-01",
+  "assets": {"directory":"./dist", "binding":"ASSETS", "not_found_handling":"single-page-application", "run_worker_first":["/api/*"]},
+  "vars": {"SUPABASE_URL":"https://qtxuehkexzbdzzxbkvaf.supabase.co", "ADMIN_EMAIL":"office@hound-capital.com"}
+}
