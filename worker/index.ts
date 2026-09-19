@@ -19,7 +19,8 @@ async function body(request:Request){
  try{const b=JSON.parse(new TextDecoder().decode(bytes));if(!b||typeof b!=='object'||Array.isArray(b))throw Error();return b as Record<string,unknown>;}catch{throw new AccessError('Invalid JSON.',400);}
 }
 async function supa(env:Env,path:string,init:RequestInit={},privileged=false){
- if(!env.SUPABASE_PUBLISHABLE_KEY||!env.SUPABASE_SECRET_KEY)throw new AccessError('Database connection is not configured yet.',503);
+ const missing = (['SUPABASE_PUBLISHABLE_KEY','SUPABASE_SECRET_KEY'] as const).filter(name => typeof env[name] !== 'string' || !env[name].trim());
+ if(missing.length)throw new AccessError('Cloudflare runtime setting missing: '+missing.join(', ')+'. Add it under this Worker\'s Settings > Variables and Secrets, then deploy the saved version.',503);
  return fetch(env.SUPABASE_URL+path,{...init,headers:{apikey:privileged?env.SUPABASE_SECRET_KEY:env.SUPABASE_PUBLISHABLE_KEY,'Content-Type':'application/json',...init.headers},signal:AbortSignal.timeout(15000)});
 }
 export default {async fetch(request:Request,env:Env):Promise<Response>{
