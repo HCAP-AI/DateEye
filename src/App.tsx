@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { CalendarDays, Check, ChevronLeft, ChevronRight, Crown, Sparkles, Users, X } from "lucide-react";
 
 type Member = { id: string; name: string; email?:string|null; active:number; linked?:number };
-type Event = { id: string; name: string; startDate: string; endDate: string };
+type Event = { id: string; name: string; startDate: string; endDate: string; archived?:boolean };
 type Availability = { memberId: string; date: string; available: boolean };
 type AppState = { event: Event | null; members: Member[]; managedMembers?:Member[]; availability: Availability[]; viewer:{isAdmin:boolean;memberId:string|null;email:string} };
 
@@ -19,7 +19,8 @@ function monthDays(month: Date) {
   return [...Array(offset).fill(null), ...Array.from({length: days}, (_, i) => new Date(month.getFullYear(), month.getMonth(), i + 1))];
 }
 
-export default function Home() {
+function Home({planId,onPlans}:{planId:string|null;onPlans:()=>void}) {
+  const fetch=(url:string,init?:RequestInit)=>window.fetch(url==="/api/state"?url+(planId?"?plan="+encodeURIComponent(planId):""):url,init);
   const [adminLogin, setAdminLogin] = useState(window.location.pathname === "/admin");
   const [state, setState] = useState<AppState | null>(null);
   const [selectedMember, setSelectedMember] = useState("");
@@ -85,12 +86,13 @@ export default function Home() {
       const names = String(form.get("members") || "").split(",").map(v => v.trim()).filter(Boolean);
       const res = await fetch("/api/state", { method: "POST", headers: {"Content-Type":"application/json"}, body: JSON.stringify({ name: form.get("name"), startDate: form.get("startDate"), endDate: form.get("endDate"), members: names }) });
       const data = await res.json() as {error?:string}; if (!res.ok) throw new Error(data.error || "Could not create the plan.");
-      await load();
+      const created=data as {planId?:string};
+      if(created.planId)window.location.assign("/?plan="+created.planId);else await load();
     } catch (e) { setError(e instanceof Error ? e.message : "Could not create the plan."); } finally { setSaving(false); }
   }
 
   async function toggle(date: string) {
-    if (!state || !selectedMember || saving) return;
+    if (!state || !selectedMember || saving || state.event?.archived) return;
     setSaving(true); setError(""); setSaveStatus("Saving…");
     const existing = state.availability.find(a => a.memberId === selectedMember && a.date === date);
     const available = !(existing?.available ?? false);
@@ -140,7 +142,7 @@ export default function Home() {
     return () => lifecycle.abort();
   }, [state?.event, state?.members, state?.viewer.memberId, participantEmail, load]);
 
-  if (adminLogin) return <AdminLogin onDone={()=>{setAdminLogin(false);setParticipantEmail("");window.history.replaceState({},"","/");void load();}} onBack={()=>{setAdminLogin(false);window.history.replaceState({},"","/");}}/>;
+  if (adminLogin) return <AdminLogin onDone={()=>{setAdminLogin(false);setParticipantEmail("");if(!planId){onPlans();}else{window.history.replaceState({},"","/?plan="+planId);void load();}}} onBack={()=>{setAdminLogin(false);window.history.replaceState({},"","/");}}/>;
 
   if (needsEmail) return <main className="setup-shell"><section className="setup-card">
     <div className="brand-mark"><CalendarDays size={25}/></div>
@@ -165,7 +167,7 @@ export default function Home() {
         <div className="brand-mark"><CalendarDays size={25}/></div>
         <p className="eyebrow">DateEye</p>
         <h1>Find the date that works.</h1>
-        <p className="intro">Administrator setup. Add names now, then add their emails in Event settings before sharing the group link.</p>
+        <button className="admin-link" onClick={onPlans}>Back to My plans</button><p className="intro">Administrator setup. Add names now, then add their emails in Event settings before sharing the group link.</p>
         <form onSubmit={e=>{e.preventDefault();void createPlan(new FormData(e.currentTarget));}}>
           <label>What are you planning?<input name="name" required placeholder="October sailing weekend" /></label>
           <div className="date-row">
@@ -191,26 +193,28 @@ export default function Home() {
         <div className="avatars">{state.members.slice(0,4).map((m,i)=><span key={m.id} style={{zIndex:5-i}}>{m.name[0].toUpperCase()}</span>)}{total>4&&<b>+{total-4}</b>}</div>
       </header>
       <div className="account-bar"><span>{state.viewer.isAdmin?"Signed in as":"Availability for"} {state.viewer.email} · {state.viewer.isAdmin?"Administrator":"Invitee"}</span><div className="account-actions">
+        {state.viewer.isAdmin&&<button onClick={onPlans}>My plans</button>}
         {state.viewer.isAdmin&&<button onClick={async()=>{const r=await fetch("/api/logout",{method:"POST",headers:{"Content-Type":"application/json"},body:"{}"});if(r.ok){setParticipantEmail("");setState(null);setNeedsEmail(true);setAdminOpen(false);}else setError("Could not sign out. Please retry.");}}>Sign out</button>}
-        {state.viewer.isAdmin&&<button onClick={()=>setAdminOpen(!adminOpen)} aria-expanded={adminOpen}>{adminOpen?"Close settings":"Event settings"}</button>}
+        {state.viewer.isAdmin&&!event.archived&&<button onClick={()=>setAdminOpen(!adminOpen)} aria-expanded={adminOpen}>{adminOpen?"Close settings":"Event settings"}</button>}
         <button disabled={saving} onClick={()=>{setState(null);setNeedsEmail(true);setError("");setAdminOpen(false);}}> {state.viewer.isAdmin?"Preview invitee entry":"Change email"}</button>
-        <button onClick={async()=>{try{await navigator.clipboard.writeText(window.location.origin+"/");setShareStatus("Group link copied — paste it into WhatsApp.");}catch{setShareStatus("Copy this group link: "+window.location.origin+"/");}}}>Copy group link</button>
+        <button onClick={async()=>{try{await navigator.clipboard.writeText(window.location.origin+"/?plan="+state.event!.id);setShareStatus("Group link copied — paste it into WhatsApp.");}catch{setShareStatus("Copy this group link: "+window.location.origin+"/?plan="+state.event!.id);}}}>Copy group link</button>
       </div></div>
+      {event.archived&&<p className="share-status">This plan is archived. Restore it from My plans to make changes.</p>}
       {shareStatus&&<p className="share-status" role="status">{shareStatus}</p>}
-      {adminOpen&&state.viewer.isAdmin&&<AdminPanel state={state} onSave={adminSave}/>}
+      {adminOpen&&state.viewer.isAdmin&&!event.archived&&<AdminPanel state={state} onSave={adminSave}/>}
       {error&&<p className="error" role="alert">{error}</p>}
       <div className="workspace">
         <section className="main-panel">
           <div className="event-head"><div><p className="eyebrow">SHARED PLAN</p><h1>{event.name}</h1><p>{parseLocal(event.startDate).toLocaleDateString("en-GB",{day:"numeric",month:"long"})} – {parseLocal(event.endDate).toLocaleDateString("en-GB",{day:"numeric",month:"long",year:"numeric"})}</p></div><div className="people-pill"><Users size={16}/>{total} people</div></div>
           <div className="mobile-tabs"><button className={view==="calendar"?"active":""} onClick={()=>setView("calendar")}>Calendar</button><button className={view==="results"?"active":""} onClick={()=>setView("results")}>Best dates</button></div>
           <div className={view==="calendar"?"calendar-wrap":"calendar-wrap mobile-hidden"}>
-            <div className="identity-row"><strong>{activeName ? activeName+" · My availability" : "Group calendar · Read only"}</strong><span>{activeName ? "Tap dates when you’re free" : "Assign your email to your name in Event settings."}</span></div>
+            <div className="identity-row"><strong>{activeName ? activeName+" · My availability" : "Group calendar · Read only"}</strong><span>{event.archived ? "Archived · Read only" : activeName ? "Tap dates when you’re free" : "Assign your email to your name in Event settings."}</span></div>
             <div className="month-nav"><button aria-label="Previous month" onClick={()=>setMonth(new Date(month.getFullYear(),month.getMonth()-1,1))}><ChevronLeft/></button><h2>{month.toLocaleDateString("en-GB",{month:"long",year:"numeric"})}</h2><button aria-label="Next month" onClick={()=>setMonth(new Date(month.getFullYear(),month.getMonth()+1,1))}><ChevronRight/></button></div>
             <div className="calendar-grid weekday-row">{weekDays.map(d=><span key={d}>{d}</span>)}</div>
             <div className="calendar-grid">{cells.map((date,i)=>{
               if(!date) return <span key={`blank-${i}`} />;
               const dateIso=iso(date); const inRange=dateIso>=event.startDate&&dateIso<=event.endDate; const mine=state.availability.find(a=>a.memberId===selectedMember&&a.date===dateIso); const count=counts.get(dateIso)?.available||0;
-              return <button key={dateIso} disabled={!inRange||!selectedMember||saving} onClick={()=>toggle(dateIso)} className={`day ${mine?.available?"mine":mine?"unavailable":""} ${count===total&&total>0?"all":""}`} aria-label={`${date.toLocaleDateString("en-GB")}, ${mine?.available?"available":mine?"unavailable":"not answered"}`}><span>{date.getDate()}</span>{inRange&&<small>{count}/{total}</small>}{mine&&<i>{mine.available?<Check size={11}/>:<X size={11}/>}</i>}</button>
+              return <button key={dateIso} disabled={!inRange||!selectedMember||saving||event.archived} onClick={()=>toggle(dateIso)} className={`day ${mine?.available?"mine":mine?"unavailable":""} ${count===total&&total>0?"all":""}`} aria-label={`${date.toLocaleDateString("en-GB")}, ${mine?.available?"available":mine?"unavailable":"not answered"}`}><span>{date.getDate()}</span>{inRange&&<small>{count}/{total}</small>}{mine&&<i>{mine.available?<Check size={11}/>:<X size={11}/>}</i>}</button>
             })}</div>
             <div className="legend"><span><i className="swatch mine"/>You’re free</span><span><i className="swatch unavailable"/>Unavailable</span><span><i className="swatch all"/>Everyone’s free</span><span><i className="swatch empty"/>No response</span></div>
           </div>
@@ -278,4 +282,26 @@ function AdminLogin({onDone,onBack}:{onDone:()=>void;onBack:()=>void}) {
  <label>Email<input name="email" type="email" autoComplete="username" required/></label>
  <label>Password<input name="password" type="password" autoComplete="current-password" required/></label>
  {error&&<p className="error" role="alert">{error}</p>}<button className="primary" disabled={busy}>{busy?"Signing in…":"Sign in"}</button></form><button className="admin-link" onClick={onBack}>Back to invitee entry</button></section></main>;
+}
+
+
+type PlanSummary={id:string;name:string;startDate:string;endDate:string;archived:boolean};
+export default function App(){
+ const initial=new URLSearchParams(window.location.search).get('plan');
+ const [plan,setPlan]=useState<string|null>(initial);
+ const [dashboard,setDashboard]=useState(!initial&&window.location.pathname!=="/admin");
+ const open=(id:string)=>{setPlan(id);setDashboard(false);window.history.pushState({},"","/?plan="+id);};
+ const home=()=>{setPlan(null);setDashboard(true);window.history.pushState({},"","/");};
+ useEffect(()=>{const pop=()=>{const id=new URLSearchParams(window.location.search).get('plan');setPlan(id);setDashboard(!id&&window.location.pathname!=="/admin");};window.addEventListener('popstate',pop);return()=>window.removeEventListener('popstate',pop);},[]);
+ return <div className="site-frame"><div className="site-content">{dashboard?<Plans onOpen={open} onGuest={()=>setDashboard(false)}/>:<Home key={plan||'entry'} planId={plan} onPlans={home}/>}</div><footer className="site-footer"><small>© Hound Capital Ltd 2026</small><a href="mailto:office@hound-capital.com" className="help-button">Help!</a></footer></div>;
+}
+function Plans({onOpen,onGuest}:{onOpen:(id:string)=>void;onGuest:()=>void}){
+ const [plans,setPlans]=useState<PlanSummary[]>([]),[loading,setLoading]=useState(true),[error,setError]=useState(''),[busy,setBusy]=useState(false),[archived,setArchived]=useState(false);
+ async function load(){try{const r=await window.fetch('/api/state?view=plans',{cache:'no-store'});if(r.status===401||r.status===403){onGuest();return;}const d=await r.json();if(!r.ok)throw Error(d.error||'Could not load plans');setPlans(d.plans||[]);setError('');}catch(e){setError(e instanceof Error?e.message:'Could not load plans');}finally{setLoading(false);}}
+ useEffect(()=>{void load();},[]);
+ async function archive(p:PlanSummary){setBusy(true);try{const r=await window.fetch('/api/state?plan='+p.id,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'archive',archived:!p.archived})});const d=await r.json();if(!r.ok)throw Error(d.error||'Could not update plan');await load();}catch(e){setError(e instanceof Error?e.message:'Could not update plan');}finally{setBusy(false);}}
+ return <main className="plans-shell"><header className="plans-heading"><div><p className="eyebrow">DateEye</p><h1>My plans</h1></div><div className="account-actions"><button onClick={()=>onOpen('new')}>Create plan</button><button onClick={async()=>{try{const r=await window.fetch('/api/logout',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});if(!r.ok)throw Error('Could not sign out');onGuest();}catch{setError('Could not sign out. Please retry.');}}}>Sign out</button></div></header>
+ <div className="account-actions"><button aria-pressed={!archived} onClick={()=>setArchived(false)}>Active plans</button><button aria-pressed={archived} onClick={()=>setArchived(true)}>Archived plans</button></div>
+ {error&&<p className="error" role="alert">{error}<button onClick={()=>void load()}>Retry</button></p>}{loading?<p>Loading plans…</p>:<div className="plan-list">{plans.filter(p=>p.archived===archived).map(p=><article className="plan-card" key={p.id}><h2>{p.name}</h2><p>{parseLocal(p.startDate).toLocaleDateString('en-GB')} – {parseLocal(p.endDate).toLocaleDateString('en-GB')}</p><div className="account-actions"><button onClick={()=>onOpen(p.id)}>Open plan</button><button disabled={busy} onClick={()=>void archive(p)}>{p.archived?'Restore':'Archive'}</button></div></article>)}{!plans.some(p=>p.archived===archived)&&<p>{archived?'No archived plans.':'No active plans. Create a plan to get started.'}</p>}</div>}
+ </main>;
 }
