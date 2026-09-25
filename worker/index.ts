@@ -1,3 +1,4 @@
+
 import {AccessError, validateEvent, validateMember, validDate} from './permissions.ts';
 export interface Env {
  SUPABASE_URL:string; SUPABASE_PUBLISHABLE_KEY:string; SUPABASE_SECRET_KEY:string; ADMIN_EMAIL:string;
@@ -39,13 +40,17 @@ export default {async fetch(request:Request,env:Env):Promise<Response>{
    if(!r.ok)throw new AccessError(r.status===429?'Too many attempts. Please try again later.':'Email or password is incorrect.',r.status===429?429:401);
    const data=await r.json() as {access_token:string;expires_in:number;user:{id:string;email?:string;email_confirmed_at?:string}};
    if(!data.user.email_confirmed_at||data.user.email?.toLowerCase()!==env.ADMIN_EMAIL.toLowerCase())throw new AccessError('Administrator account is not confirmed.',403);
-   const allowed=await supa(env,'/rest/v1/rpc/dateeye_state',{method:'POST',body:JSON.stringify({p_method:'GET',p_body:{},p_email:null,p_user:data.user.id})},true);
+   const allowed=await supa(env,'/rest/v1/rpc/dateeye_state',{method:'POST',body:JSON.stringify({p_method:'GET',p_body:{view:'plans'},p_email:null,p_user:data.user.id})},true);
    if(!allowed.ok)throw new AccessError('Administrator access has not been granted. Complete setup step 3.',403);
    return json({ok:true},200,{'Set-Cookie':cookieValue(request,data.access_token,Math.min(data.expires_in,3600))});
   }
   if(path!=='/api/state')return json({error:'Not found.'},404);
   if(!['GET','POST','PUT','PATCH'].includes(request.method))return json({error:'Method not allowed.'},405);
-  const b=request.method==='GET'?{}:await body(request);
+  const b:Record<string,unknown>=request.method==='GET'?{}:await body(request);
+  const url=new URL(request.url);
+  b.planId=url.searchParams.get('plan')||null;
+  b.view=url.searchParams.get('view')||null;
+  if(b.planId && b.planId!=='new' && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(b.planId)))throw new AccessError('Invalid plan link.',400);
   const entry=request.headers.get('x-dateeye-email');let email:string|null=null,user:string|null=null;
   if(entry!==null){
    email=entry.trim().toLowerCase();if(!email||email.length>254||!/^\S+@[^\s@]+\.[^\s@]+$/.test(email))throw new AccessError('Please enter a valid email.',400);
