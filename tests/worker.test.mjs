@@ -18,3 +18,8 @@ test('successful login returns HttpOnly secure cookie, never token JSON',async()
  try{const r=await worker.fetch(req('/api/login',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({email:env.ADMIN_EMAIL,password:'test-only-password'})}),env);assert.equal(r.status,200);assert.match(r.headers.get('set-cookie'),/HttpOnly; SameSite=Strict; Max-Age=3600; Secure/);assert.deepEqual(await r.json(),{ok:true});}finally{globalThis.fetch=old;}
 });
 test('signout clears cookie',async()=>{const r=await worker.fetch(req('/api/logout',{method:'POST',headers:{'content-type':'application/json'},body:'{}'}),env);assert.equal(r.status,200);assert.match(r.headers.get('set-cookie'),/Max-Age=0/);});
+test('plan from URL is forwarded and cannot be overridden by request body',async()=>{
+ const old=globalThis.fetch;let payload;const id='33333333-3333-4333-8333-333333333333';
+ globalThis.fetch=async(url,init)=>{payload=JSON.parse(init.body);return Response.json({ok:true});};
+ try{const r=await worker.fetch(req('/api/state?plan='+id,{method:'PUT',headers:{'x-dateeye-email':'person@example.com','content-type':'application/json'},body:JSON.stringify({planId:'attacker-plan',memberId:'member',date:'2026-10-01',available:true})}),env);assert.equal(r.status,200);assert.equal(payload.p_body.planId,id);assert.equal(payload.p_user,null);}finally{globalThis.fetch=old;}
+});
