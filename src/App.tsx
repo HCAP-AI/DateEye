@@ -1,7 +1,8 @@
 
-
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { CalendarDays, Check, ChevronLeft, ChevronRight, Crown, Sparkles, Users, X } from "lucide-react";
+
+function BrandLogo(){return <a className="prod-logo" href="/" aria-label="prod. home"><img src="/prod-logo.png" alt="prod." width="220" height="100"/></a>;}
 
 type Member = { id: string; name: string; email?:string|null; active:number; linked?:number };
 type Event = { id: string; name: string; startDate: string; endDate: string; archived?:boolean };
@@ -154,8 +155,7 @@ function Home({planId,onPlans,guest=false}:{planId:string|null;onPlans:()=>void;
   if (adminLogin) return <AdminLogin onDone={()=>{setAdminLogin(false);setParticipantEmail("");window.location.assign("/manage"+(resolvedPlan?"?plan="+resolvedPlan:""));}} onBack={()=>{setAdminLogin(false);window.history.replaceState({},"","/");}}/>;
 
   if (needsEmail) return <main className="setup-shell"><section className="setup-card">
-    <div className="brand-mark"><CalendarDays size={25}/></div>
-    <p className="eyebrow">prod.</p><h1>When are you free?</h1>
+    <BrandLogo/><h1>When are you free?</h1>
     <p className="intro">Please enter your email address</p>
     <form onSubmit={e=>{e.preventDefault();const email=String(new FormData(e.currentTarget).get("email")||"").trim().toLowerCase();setError("");if(email===participantEmail)void load();else setParticipantEmail(email);}}>
       <label>Your email<input name="email" type="email" autoComplete="email" inputMode="email" autoCapitalize="none" spellCheck={false} defaultValue={participantEmail} required maxLength={254} placeholder="you@example.com"/></label>
@@ -174,8 +174,7 @@ function Home({planId,onPlans,guest=false}:{planId:string|null;onPlans:()=>void;
   if (!state.event) return (
     <main className="setup-shell">
       <section className="setup-card">
-        <div className="brand-mark"><CalendarDays size={25}/></div>
-        <p className="eyebrow">prod.</p>
+        <BrandLogo/>
         <h1>Find the date that works.</h1>
         <button className="admin-link" onClick={onPlans}>Back to My plans</button><p className="intro">Administrator setup. Add names now, then add their emails in Event settings before sharing the group link.</p>
         <form onSubmit={e=>{e.preventDefault();void createPlan(new FormData(e.currentTarget));}}>
@@ -199,7 +198,7 @@ function Home({planId,onPlans,guest=false}:{planId:string|null;onPlans:()=>void;
   return (
     <main className="app-shell">
       <header className="topbar">
-        <div className="brand"><span className="brand-mark small"><CalendarDays size={19}/></span><span>prod.</span></div>
+        <div className="brand"><BrandLogo/></div>
         <div className="avatars">{state.members.slice(0,4).map((m,i)=><span key={m.id} style={{zIndex:5-i}}>{m.name[0].toUpperCase()}</span>)}{total>4&&<b>+{total-4}</b>}</div>
       </header>
       <div className="account-bar"><span>{state.viewer.isAdmin?"Signed in as":"Availability for"} {state.viewer.email} · {state.viewer.isAdmin?"Administrator":"Invitee"}</span><div className="account-actions">
@@ -287,7 +286,7 @@ function MemberEditor({member,onSave}:{member?:Member;onSave:(payload:unknown)=>
 
 function AdminLogin({onDone,onBack}:{onDone:()=>void;onBack:()=>void}) {
  const [error,setError]=useState(""); const [busy,setBusy]=useState(false);
- return <main className="setup-shell"><section className="setup-card"><div className="brand-mark"><CalendarDays size={25}/></div><p className="eyebrow">prod.</p><h1>Administrator sign-in</h1>
+ return <main className="setup-shell"><section className="setup-card"><BrandLogo/><h1>Administrator sign-in</h1>
  <form onSubmit={async e=>{e.preventDefault();const form=new FormData(e.currentTarget);setBusy(true);setError("");try{const r=await fetch("/api/login",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({email:form.get("email"),password:form.get("password")})});if(!r.ok){const data=await r.json();throw new Error(data.error||"Sign-in failed.");}onDone();}catch(e){setError(e instanceof Error?e.message:"Sign-in failed.");}finally{setBusy(false);}}}>
  <label>Email<input name="email" type="email" autoComplete="username" required/></label>
  <label>Password<input name="password" type="password" autoComplete="current-password" required/></label>
@@ -308,8 +307,8 @@ export default function App(){
  else if(url.pathname==='/register'||url.pathname==='/signin')page=<InviterGate key={url.pathname} register={url.pathname==='/register'} onReady={()=>navigate(url.pathname==='/register'?'/manage?plan=new':'/manage')}/>;
  else if(url.pathname==='/admin')page=<AdminLogin onDone={()=>navigate('/manage')} onBack={()=>navigate('/')}/>;
  else if(plan||url.pathname==='/respond')page=<Home key={plan||'guest'} guest planId={plan} onPlans={()=>navigate('/manage')}/>;
- else page=<main className="landing"><a className="wordmark" href="/">prod.</a><section className="landing-intro"><p className="eyebrow">LESS BACK AND FORTH. MORE GETTING TOGETHER.</p><h1>Good plans start<br/>with a little prod.</h1><p>Bring your people together. Find a date that works.</p></section><div className="landing-choices"><section><CalendarDays size={30}/><h2>Make a plan</h2><p>A catch-up, a weekend away, or something worth getting everyone together for.</p><button className="primary" onClick={()=>navigate('/register')}>Create an event <ChevronRight size={18}/></button><button className="admin-link" onClick={()=>navigate('/signin')}>Already registered? Sign in</button></section><section><Users size={30}/><h2>Been invited?</h2><p>Let your friends know when you’re free and get the plan moving.</p><button className="primary guest-cta" onClick={()=>navigate('/respond')}>Respond to an invitation <ChevronRight size={18}/></button><p className="landing-hint">Have an event link? Open it to go straight to your event.</p></section></div></main>;
- return <div className="site-frame"><div className="site-content">{page}</div><footer className="site-footer"><a href="/">prod.</a><small>© Hound Capital Ltd 2026</small><a href="mailto:office@hound-capital.com" className="help-button">Help!</a></footer></div>;
+ else page=<main className="landing"><BrandLogo/><section className="landing-intro"><p className="eyebrow">LESS BACK AND FORTH. MORE GETTING TOGETHER.</p><h1>Good plans start<br/>with a little prod.</h1><p>Bring your people together. Find a date that works.</p></section><div className="landing-choices"><section><CalendarDays size={30}/><h2>Make a plan</h2><p>A catch-up, a weekend away, or something worth getting everyone together for.</p><button className="primary" onClick={()=>navigate('/register')}>Create an event <ChevronRight size={18}/></button><button className="admin-link" onClick={()=>navigate('/signin')}>Already registered? Sign in</button></section><section><Users size={30}/><h2>Been invited?</h2><p>Let your friends know when you’re free and get the plan moving.</p><button className="primary guest-cta" onClick={()=>navigate('/respond')}>Respond to an invitation <ChevronRight size={18}/></button><p className="landing-hint">Have an event link? Open it to go straight to your event.</p></section></div></main>;
+ return <div className="site-frame"><div className="site-content">{page}</div><footer className="site-footer"><BrandLogo/><small>© Hound Capital Ltd 2026</small><a href="mailto:office@hound-capital.com" className="help-button">Help!</a></footer></div>;
 }
 function InviterGate({children,register=false,onReady}:{children?:React.ReactNode;register?:boolean;onReady:()=>void}){
  const [stage,setStage]=useState('loading'),[email,setEmail]=useState(''),[error,setError]=useState(''),[busy,setBusy]=useState(false);
@@ -324,7 +323,7 @@ function InviterGate({children,register=false,onReady}:{children?:React.ReactNod
  }catch(e){setError(e instanceof Error?e.message:'Please try again.');}finally{setBusy(false);}}
  if(stage==='ready')return <>{children||<p className="center">Opening your event…</p>}</>;
  if(stage==='loading')return <p className="center">Opening your account…</p>;
- return <main className="setup-shell"><section className="setup-card"><a className="wordmark" href="/">prod.</a><h1>{stage==='code'?'Check your email':stage==='profile'?'Your details':stage==='register'?'Let’s make a plan.':'Welcome back.'}</h1><p className="intro">{stage==='code'?`Enter the sign-in code sent to ${email}.`:stage==='register'?'Register once, then create your event.':stage==='profile'?'Complete your details before creating an event.':'Enter your email and we’ll send you a sign-in code.'}</p><form onSubmit={e=>{e.preventDefault();void submit(new FormData(e.currentTarget));}}>
+ return <main className="setup-shell"><section className="setup-card"><BrandLogo/><h1>{stage==='code'?'Check your email':stage==='profile'?'Your details':stage==='register'?'Let’s make a plan.':'Welcome back.'}</h1><p className="intro">{stage==='code'?`Enter the sign-in code sent to ${email}.`:stage==='register'?'Register once, then create your event.':stage==='profile'?'Complete your details before creating an event.':'Enter your email and we’ll send you a sign-in code.'}</p><form onSubmit={e=>{e.preventDefault();void submit(new FormData(e.currentTarget));}}>
  {(stage==='register'||stage==='profile')&&<><label>Name<input name="name" autoComplete="name" maxLength={80} required defaultValue={details.name}/></label></>}
  {(stage==='register'||stage==='email')&&<label>Email<input name="email" type="email" autoComplete="email" required maxLength={254} defaultValue={email}/></label>}
  {(stage==='register'||stage==='profile')&&<><label>Sex<select name="sex" required defaultValue={details.sex}><option value="" disabled>Select</option>{['Female','Male','Intersex','Prefer not to say'].map(x=><option key={x}>{x}</option>)}</select></label><label>Age range<select name="ageRange" required defaultValue={details.ageRange}><option value="" disabled>Select</option>{['Under 18','18–24','25–34','35–44','45–54','55–64','65+','Prefer not to say'].map(x=><option key={x}>{x}</option>)}</select></label><p className="pilot-note">Your registration details are private and are not shown to invitees.</p></>}
@@ -339,8 +338,9 @@ function Plans({onOpen,onGuest}:{onOpen:(id:string)=>void;onGuest:()=>void}){
  async function load(){try{const r=await window.fetch('/api/state?view=plans',{cache:'no-store'});if(r.status===401||r.status===403){onGuest();return;}const d=await r.json();if(!r.ok)throw Error(d.error||'Could not load plans');setPlans(d.plans||[]);setError('');}catch(e){setError(e instanceof Error?e.message:'Could not load plans');}finally{setLoading(false);}}
  useEffect(()=>{void load();},[]);
  async function archive(p:PlanSummary){setBusy(true);try{const r=await window.fetch('/api/state?plan='+p.id,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'archive',archived:!p.archived})});const d=await r.json();if(!r.ok)throw Error(d.error||'Could not update plan');await load();}catch(e){setError(e instanceof Error?e.message:'Could not update plan');}finally{setBusy(false);}}
- return <main className="plans-shell"><header className="plans-heading"><div><p className="eyebrow">prod.</p><h1>My plans</h1></div><div className="account-actions"><button onClick={()=>onOpen('new')}>Create plan</button><button onClick={async()=>{try{const r=await window.fetch('/api/logout',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});if(!r.ok)throw Error('Could not sign out');onGuest();}catch{setError('Could not sign out. Please retry.');}}}>Sign out</button></div></header>
+ return <main className="plans-shell"><header className="plans-heading"><div><BrandLogo/><h1>My plans</h1></div><div className="account-actions"><button onClick={()=>onOpen('new')}>Create plan</button><button onClick={async()=>{try{const r=await window.fetch('/api/logout',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});if(!r.ok)throw Error('Could not sign out');onGuest();}catch{setError('Could not sign out. Please retry.');}}}>Sign out</button></div></header>
  <div className="account-actions"><button aria-pressed={!archived} onClick={()=>setArchived(false)}>Active plans</button><button aria-pressed={archived} onClick={()=>setArchived(true)}>Archived plans</button></div>
  {error&&<p className="error" role="alert">{error}<button onClick={()=>void load()}>Retry</button></p>}{loading?<p>Loading plans…</p>:<div className="plan-list">{plans.filter(p=>p.archived===archived).map(p=><article className="plan-card" key={p.id}><h2>{p.name}</h2><p>{parseLocal(p.startDate).toLocaleDateString('en-GB')} – {parseLocal(p.endDate).toLocaleDateString('en-GB')}</p><div className="account-actions"><button onClick={()=>onOpen(p.id)}>Open plan</button><button disabled={busy} onClick={()=>void archive(p)}>{p.archived?'Restore':'Archive'}</button></div></article>)}{!plans.some(p=>p.archived===archived)&&<p>{archived?'No archived plans.':'No active plans. Create a plan to get started.'}</p>}</div>}
  </main>;
 }
+
