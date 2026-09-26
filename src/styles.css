@@ -42,3 +42,7 @@ a{color:var(--green)} button:focus-visible,a:focus-visible{outline:3px solid var
 
 :root{--green:#397e78;--mint:#edf7f5;--orange:#e77767;--paper:#faf8f5}
 .landing-choices .primary:not(.guest-cta){background:#b64e40;color:white}.wordmark{font-weight:400;border-top:2px solid #458d88;border-bottom:2px solid #458d88;padding:4px 12px 9px;line-height:1.1}
+
+
+/* Supplied prod. logo: preserve the original artwork and proportions. */
+.prod-logo{display:inline-block;line-height:0;flex-shrink:0}.prod-logo img{display:block;width:200px;height:auto;max-width:100%}.landing>.prod-logo img{width:240px}.setup-card>.prod-logo{margin-bottom:20px}.brand .prod-logo img{width:125px}.plans-heading .prod-logo img{width:150px}.site-footer .prod-logo img{width:64px}
