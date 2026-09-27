@@ -1,11 +1,11 @@
 # prod. compliance pack — draft for launch review
-27 September 2026 · operator assumed to be Hound Capital Ltd · version 0.1
+27 September 2026 · operator: Hound Capital Ltd (company details supplied by owner) · version 0.1
 
 **Status:** Draft for legal and operational review. The live architecture was inspected in GitHub; contracts, provider settings, actual cookies, data residency, backup retention, company registration details, and the production database were not independently verified. Complete the launch checklist before publication. The app currently permits invitees to respond with an unverified email address, which is a material access and privacy issue.
 
 ## A. Terms of Service — proposed public text
 
-**Operator and contact.** prod. is provided by Hound Capital Ltd [insert registered company number and registered office], England and Wales. Contact office@hound-capital.com.
+**Operator and contact.** prod. is provided by Hound Capital Ltd (company number 14932445), Mondays House, Farm Road, Bracklesham Bay, West Sussex, PO20 8JT, England and Wales. Contact office@hound-capital.com.
 
 **Eligibility.** You must be 18 or older to create an account or use prod. Do not register or respond if you are under 18. We may suspend accounts where we reasonably believe this condition is not met.
 
@@ -21,7 +21,7 @@
 
 ## B. Privacy Policy — proposed public text
 
-**Who we are.** Hound Capital Ltd [company number and registered office to insert] is the controller of personal information used for prod. Contact office@hound-capital.com for privacy enquiries. You may complain to the Information Commissioner's Office (ico.org.uk).
+**Who we are.** Hound Capital Ltd (company number 14932445), Mondays House, Farm Road, Bracklesham Bay, West Sussex, PO20 8JT is the controller of personal information used for prod. Contact office@hound-capital.com for privacy enquiries. You may complain to the Information Commissioner's Office (ico.org.uk).
 
 **What we collect.** Organisers provide a name, email, sex selection (including “Prefer not to say”), age range, and acceptance of Terms. We record the Terms version and acceptance time. They create plan titles, dates, participant names and optional participant emails. Participants provide availability responses, and may provide an email to open an invitation. Authentication providers process verification codes and account identifiers. We may hold IP addresses, technical logs and support correspondence. Please avoid entering sensitive information in free-text fields.
 
@@ -67,7 +67,7 @@ Do not state proposed periods as operational facts until configured and tested. 
 | Worker ↔ Supabase database | profiles, plans, names, emails, dates, responses | service-role RPC privileges, RLS, backup lifecycle, retention |
 | Organiser ↔ invitee | plan link, names, availability | Current invitee email is not verified; fix authorisation before launch |
 
-Controller: Hound Capital Ltd assumed. Obtain company identity, supplier agreements, transfer mechanism, privacy contact, legitimate-interest assessment for invitations, provider breach contacts and ICO fee self-assessment. Check whether the sex field has a justified purpose; otherwise remove it and migrate old records. Complete a children's access risk assessment: an 18+ statement and self-declared age alone do not establish that children are unlikely to use a friends-planning service.
+Controller: Hound Capital Ltd. Confirm the supplied address is the registered office, then obtain supplier agreements, transfer mechanism, privacy contact, legitimate-interest assessment for invitations, provider breach contacts and ICO fee self-assessment. Check whether the sex field has a justified purpose; otherwise remove it and migrate old records. Complete a children's access risk assessment: an 18+ statement and self-declared age alone do not establish that children are unlikely to use a friends-planning service.
 
 ## F. Personal-data breach procedure
 
