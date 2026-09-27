@@ -47,3 +47,11 @@ a{color:var(--green)} button:focus-visible,a:focus-visible{outline:3px solid var
 /* Supplied prod. logo: preserve the original artwork and proportions. */
 .prod-logo{display:inline-block;line-height:0;flex-shrink:0}.prod-logo img{display:block;width:200px;height:auto;max-width:100%}.landing>.prod-logo img{width:240px}.setup-card>.prod-logo{margin-bottom:20px}.brand .prod-logo img{width:125px}.plans-heading .prod-logo img{width:150px}.site-footer .prod-logo img{width:64px}
 .legal-page{max-width:780px;margin:0 auto;padding:40px 24px 70px;color:var(--text,#193634);line-height:1.6}.legal-page> a img{height:auto}.legal-page h1,.legal-page h2{color:#226a69}.legal-page h1{font-size:2.3rem}.legal-page section{scroll-margin-top:20px;margin:34px 0}.legal-page nav{display:flex;flex-wrap:wrap;gap:10px;padding:14px 0;border-block:1px solid #d8e6e2}.legal-page a{color:#226a69}.legal-page table{width:100%;border-collapse:collapse}.legal-page th,.legal-page td{text-align:left;vertical-align:top;padding:10px;border-bottom:1px solid #d8e6e2}.legal-page th{background:#226a69;color:white}.legal-page label{display:block;margin:20px 0}.legal-page label input{display:block;margin-top:6px}.terms-check{display:flex!important;align-items:flex-start;gap:9px;font-size:14px}.terms-check input{width:auto!important;margin-top:3px!important}.site-footer>a[href="/terms"]{color:#e77767;text-decoration:none;font-weight:600}
+
+/* Keep agreement copy together beside a properly sized checkbox. */
+.setup-card label.terms-check{display:flex!important;flex-direction:row;align-items:flex-start;gap:12px;margin:18px 0;padding:16px;background:#edf7f5;border:1px solid #c9e2dd;border-radius:12px;font-size:14px;font-weight:400;line-height:1.65;color:#344e4b;cursor:pointer}
+.setup-card label.terms-check input[type="checkbox"]{appearance:auto;flex:0 0 18px;width:18px!important;height:18px;min-height:18px;margin:3px 0 0!important;padding:0;accent-color:#397e78;cursor:pointer}
+.setup-card .terms-check-copy{display:block;min-width:0;font-size:inherit;font-weight:400;line-height:inherit;color:inherit}
+.setup-card .terms-check-copy a{display:inline;color:#256c67;font-weight:600;text-decoration:underline;text-underline-offset:3px}
+.setup-card .terms-check-copy a:hover{color:#ad493e}
+.setup-card label.terms-check:focus-within{outline:2px solid #e77767;outline-offset:3px}
