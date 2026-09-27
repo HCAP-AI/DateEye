@@ -184,7 +184,7 @@ function Home({planId,onPlans,guest=false}:{planId:string|null;onPlans:()=>void;
             <label>From<input name="startDate" type="date" required /></label>
             <label>To<input name="endDate" type="date" required /></label>
           </div>
-          <label>Who’s coming?<textarea name="members" required placeholder="Oliver, Charlotte, James, Sophie" /><span>Separate names with commas</span></label>
+          <label>Who’s coming?<textarea name="members" required placeholder="Oliver, Henry, Eric, Poppy" /><span>Separate names with commas</span></label>
           {error && <p className="error">{error}</p>}
           <button className="primary" disabled={saving}>{saving ? "Creating…" : "Continue to Event Settings"}<ChevronRight size={18}/></button>
         </form>
