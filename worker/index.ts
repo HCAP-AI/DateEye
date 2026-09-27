@@ -38,9 +38,28 @@ export default {async fetch(request:Request,env:Env):Promise<Response>{
   if(path==='/api/send-code'&&request.method==='POST'){
    const b=await body(request);const email=String(b.email||'').trim().toLowerCase();
    if(email.length>254||!/^\S+@[^\s@]+\.[^\s@]+$/.test(email))throw new AccessError('Please enter a valid email.',400);
-   const r=await supa(env,'/auth/v1/otp',{method:'POST',body:JSON.stringify({email,create_user:true})});
+   const r=await supa(env,'/auth/v1/otp?redirect_to='+encodeURIComponent(new URL(request.url).origin+'/auth/confirmed'),{method:'POST',body:JSON.stringify({email,create_user:true,...(b.profile?{data:{prod_profile:b.profile}}:{})})});
    if(!r.ok)throw new AccessError(r.status===429?'Please wait before requesting another code.':'Could not send a code. Please try again.',r.status===429?429:502);
    return json({ok:true});
+  }
+  if(path==='/api/confirmed'&&request.method==='POST'){
+   const b=await body(request);
+   if(typeof b.token!=='string'||b.token.length>12000)throw new AccessError('Confirmation link is invalid. Please sign in again.',401);
+   const auth=await supa(env,'/auth/v1/user',{headers:{Authorization:'Bearer '+b.token}});
+   if(!auth.ok)throw new AccessError('Confirmation link expired. Please sign in again.',401);
+   const u=await auth.json() as {id:string;email:string;email_confirmed_at?:string;user_metadata?:{prod_profile?:unknown}};
+   if(!u.email_confirmed_at||!u.email)throw new AccessError('Please confirm your email first.',403);
+   // Identity and destination come from Supabase, never the submitted email.
+   const existing=await supa(env,'/rest/v1/rpc/prod_profile',{method:'POST',body:JSON.stringify({p_user:u.id,p_save:false,p_profile:{}})},true);
+   if(!existing.ok)throw new AccessError('Could not load registration. Please retry.',502);
+   const saved=await existing.json() as {profile:unknown};
+   if(!saved.profile&&u.user_metadata?.prod_profile){
+    const profile=await supa(env,'/rest/v1/rpc/prod_profile',{method:'POST',body:JSON.stringify({p_user:u.id,p_save:true,p_profile:u.user_metadata.prod_profile})},true);
+    if(!profile.ok)throw new AccessError('Could not save registration details. Please retry.',502);
+   }
+   const sent=await supa(env,'/auth/v1/otp',{method:'POST',body:JSON.stringify({email:u.email,create_user:false})});
+   if(!sent.ok)throw new AccessError(sent.status===429?'Your email is confirmed. Please wait a minute, then retry sending your code.':'Your email is confirmed, but the code could not be sent. Please retry.',sent.status===429?429:502);
+   return json({ok:true,email:u.email});
   }
   if(path==='/api/verify-code'&&request.method==='POST'){
    const b=await body(request);
@@ -112,4 +131,6 @@ export default {async fetch(request:Request,env:Env):Promise<Response>{
   return json(result,request.method==='POST'?201:200);
  }catch(e){return json({error:e instanceof AccessError?e.message:'Service temporarily unavailable. Please retry.'},e instanceof AccessError?e.status:503);}
 }};
+
+
 
