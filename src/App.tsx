@@ -303,24 +303,39 @@ export default function App(){
  const manage=url.pathname==='/manage';
  const open=(id:string)=>navigate('/manage?plan='+id);
  let page;
- if(manage)page=<InviterGate key="manage" onReady={()=>{}}>{plan?<Home key={plan} planId={plan} onPlans={()=>navigate('/manage')}/>:<Plans onOpen={open} onGuest={()=>navigate('/signin')}/>}</InviterGate>;
+ if(url.pathname==='/auth/confirmed')page=<ConfirmationReturn onReady={()=>navigate('/manage?plan=new')}/>;
+ else if(manage)page=<InviterGate key="manage" onReady={()=>{}}>{plan?<Home key={plan} planId={plan} onPlans={()=>navigate('/manage')}/>:<Plans onOpen={open} onGuest={()=>navigate('/signin')}/>}</InviterGate>;
  else if(url.pathname==='/register'||url.pathname==='/signin')page=<InviterGate key={url.pathname} register={url.pathname==='/register'} onReady={()=>navigate(url.pathname==='/register'?'/manage?plan=new':'/manage')}/>;
  else if(url.pathname==='/admin')page=<AdminLogin onDone={()=>navigate('/manage')} onBack={()=>navigate('/')}/>;
  else if(plan||url.pathname==='/respond')page=<Home key={plan||'guest'} guest planId={plan} onPlans={()=>navigate('/manage')}/>;
  else page=<main className="landing"><BrandLogo/><section className="landing-intro"><p className="eyebrow">LESS BACK AND FORTH. MORE GETTING TOGETHER.</p><h1>Good plans start<br/>with a little prod.</h1><p>Bring your people together. Find a date that works.</p></section><div className="landing-choices"><section><CalendarDays size={30}/><h2>Make a plan</h2><p>A catch-up, a weekend away, or something worth getting everyone together for.</p><button className="primary" onClick={()=>navigate('/register')}>Create an event <ChevronRight size={18}/></button><button className="admin-link" onClick={()=>navigate('/signin')}>Already registered? Sign in</button></section><section><Users size={30}/><h2>Been invited?</h2><p>Let your friends know when you’re free and get the plan moving.</p><button className="primary guest-cta" onClick={()=>navigate('/respond')}>Respond to an invitation <ChevronRight size={18}/></button><p className="landing-hint">Have an event link? Open it to go straight to your event.</p></section></div></main>;
  return <div className="site-frame"><div className="site-content">{page}</div><footer className="site-footer"><BrandLogo/><small>© Hound Capital Ltd 2026</small><a href="mailto:office@hound-capital.com" className="help-button">Help!</a></footer></div>;
 }
-function InviterGate({children,register=false,onReady}:{children?:React.ReactNode;register?:boolean;onReady:()=>void}){
- const [stage,setStage]=useState('loading'),[email,setEmail]=useState(''),[error,setError]=useState(''),[busy,setBusy]=useState(false);
+
+function ConfirmationReturn({onReady}:{onReady:()=>void}){
+ const [token]=useState(()=>new URLSearchParams(window.location.hash.slice(1)).get('access_token')||'');
+ const [email,setEmail]=useState(''),[error,setError]=useState(''),[busy,setBusy]=useState(true);
+ async function send(){setBusy(true);setError('');try{
+  if(!token)throw Error('This confirmation link is missing or expired. Please return to sign in.');
+  const r=await fetch('/api/confirmed',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token})});const d=await r.json();if(!r.ok)throw Error(d.error||'Could not send your code.');setEmail(d.email);
+ }catch(e){setError(e instanceof Error?e.message:'Please try again.');}finally{setBusy(false);}}
+ useEffect(()=>{window.history.replaceState({},'',window.location.pathname);void send();},[]);
+ if(email)return <InviterGate confirmedEmail={email} onReady={onReady}/>;
+ return <main className="setup-shell"><section className="setup-card"><BrandLogo/><h1>Email confirmation</h1>{busy?<p>Preparing your sign-in code…</p>:<><p role="alert">{error}</p>{token&&<button className="primary" onClick={()=>void send()}>Retry sending code</button>}<a className="admin-link" href="/signin">Return to sign in</a></>}</section></main>;
+}
+
+function InviterGate({children,register=false,onReady,confirmedEmail=''}:{children?:React.ReactNode;register?:boolean;onReady:()=>void;confirmedEmail?:string}){
+ const [stage,setStage]=useState(confirmedEmail?'code':'loading'),[email,setEmail]=useState(confirmedEmail),[error,setError]=useState(''),[busy,setBusy]=useState(false);
  const [details,setDetails]=useState({name:'',sex:'',ageRange:''});
  async function api(path:string,data?:unknown){const r=await window.fetch(path,data===undefined?{cache:'no-store'}:{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});const d=await r.json();if(!r.ok)throw Error(d.error||'Please try again.');return d;}
  async function check(){try{const d=await api('/api/profile');setEmail(d.email);if(d.profile){setStage('ready');if(!children)onReady();}else setStage('profile');}catch{setStage(register?'register':'email');}}
- useEffect(()=>{void check();},[]);
+ useEffect(()=>{if(!confirmedEmail)void check();},[]);
  async function submit(form:FormData){setBusy(true);setError('');try{
- if(stage==='register'||stage==='email'){const e=String(form.get('email')).trim();setEmail(e);if(stage==='register')setDetails({name:String(form.get('name')),sex:String(form.get('sex')),ageRange:String(form.get('ageRange'))});await api('/api/send-code',{email:e});setStage('code');}
+ if(stage==='register'||stage==='email'){const e=String(form.get('email')).trim();setEmail(e);if(stage==='register')setDetails({name:String(form.get('name')),sex:String(form.get('sex')),ageRange:String(form.get('ageRange'))});await api('/api/send-code',{email:e,...(stage==='register'?{profile:{name:String(form.get('name')),sex:String(form.get('sex')),ageRange:String(form.get('ageRange'))}}:{})});setStage(stage==='register'?'confirmation':'code');}
  else if(stage==='code'){await api('/api/verify-code',{email,code:String(form.get('code')).trim()});if(details.name){try{await api('/api/profile',details);}catch(e){setStage('profile');throw e;}}await check();}
  else if(stage==='profile'){await api('/api/profile',{name:form.get('name'),sex:form.get('sex'),ageRange:form.get('ageRange')});setStage('ready');if(!children)onReady();}
  }catch(e){setError(e instanceof Error?e.message:'Please try again.');}finally{setBusy(false);}}
+ if(stage==='confirmation')return <main className="setup-shell"><section className="setup-card"><BrandLogo/><h1>Check your email</h1><p>Open the confirmation link sent to {email}. Once confirmed, we’ll send your sign-in code automatically.</p><p>Already registered? Your email may contain a sign-in code instead.</p><button className="primary" onClick={()=>setStage('code')}>Enter a sign-in code</button><button className="admin-link" onClick={()=>setStage('register')}>Change details or resend</button></section></main>;
  if(stage==='ready')return <>{children||<p className="center">Opening your event…</p>}</>;
  if(stage==='loading')return <p className="center">Opening your account…</p>;
  return <main className="setup-shell"><section className="setup-card"><BrandLogo/><h1>{stage==='code'?'Check your email':stage==='profile'?'Your details':stage==='register'?'Let’s make a plan.':'Welcome back.'}</h1><p className="intro">{stage==='code'?`Enter the sign-in code sent to ${email}.`:stage==='register'?'Register once, then create your event.':stage==='profile'?'Complete your details before creating an event.':'Enter your email and we’ll send you a sign-in code.'}</p><form onSubmit={e=>{e.preventDefault();void submit(new FormData(e.currentTarget));}}>
@@ -328,7 +343,7 @@ function InviterGate({children,register=false,onReady}:{children?:React.ReactNod
  {(stage==='register'||stage==='email')&&<label>Email<input name="email" type="email" autoComplete="email" required maxLength={254} defaultValue={email}/></label>}
  {(stage==='register'||stage==='profile')&&<><label>Sex<select name="sex" required defaultValue={details.sex}><option value="" disabled>Select</option>{['Female','Male','Intersex','Prefer not to say'].map(x=><option key={x}>{x}</option>)}</select></label><label>Age range<select name="ageRange" required defaultValue={details.ageRange}><option value="" disabled>Select</option>{['Under 18','18–24','25–34','35–44','45–54','55–64','65+','Prefer not to say'].map(x=><option key={x}>{x}</option>)}</select></label><p className="pilot-note">Your registration details are private and are not shown to invitees.</p></>}
  {stage==='code'&&<label>Sign-in code<input name="code" inputMode="numeric" autoComplete="one-time-code" pattern="[0-9]{6,10}" required maxLength={10}/></label>}
- {error&&<p className="error" role="alert">{error}</p>}<button className="primary" disabled={busy}>{busy?'Please wait…':stage==='code'?'Verify email':stage==='profile'?'Continue to event':'Send sign-in code'}</button></form>
+ {error&&<p className="error" role="alert">{error}</p>}<button className="primary" disabled={busy}>{busy?'Please wait…':stage==='code'?'Verify email':stage==='profile'?'Continue to event':stage==='register'?'Register':'Send sign-in code'}</button></form>
  {stage==='code'&&<button className="admin-link" disabled={busy} onClick={()=>{setError('');setStage(details.name?'register':'email');}}>Change email or request another code</button>}
  <a className="admin-link" href="/">Back to home</a><a className="admin-link" href="/admin">Existing administrator password sign-in</a></section></main>;
 }
@@ -343,4 +358,6 @@ function Plans({onOpen,onGuest}:{onOpen:(id:string)=>void;onGuest:()=>void}){
  {error&&<p className="error" role="alert">{error}<button onClick={()=>void load()}>Retry</button></p>}{loading?<p>Loading plans…</p>:<div className="plan-list">{plans.filter(p=>p.archived===archived).map(p=><article className="plan-card" key={p.id}><h2>{p.name}</h2><p>{parseLocal(p.startDate).toLocaleDateString('en-GB')} – {parseLocal(p.endDate).toLocaleDateString('en-GB')}</p><div className="account-actions"><button onClick={()=>onOpen(p.id)}>Open plan</button><button disabled={busy} onClick={()=>void archive(p)}>{p.archived?'Restore':'Archive'}</button></div></article>)}{!plans.some(p=>p.archived===archived)&&<p>{archived?'No archived plans.':'No active plans. Create a plan to get started.'}</p>}</div>}
  </main>;
 }
+
+
 
