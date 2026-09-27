@@ -1,5 +1,5 @@
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { CalendarDays, Check, ChevronLeft, ChevronRight, Crown, Sparkles, Users, X } from "lucide-react";
 
 function BrandLogo(){return <a className="prod-logo" href="/" aria-label="prod. home"><img src="/prod-logo.png" alt="prod." width="220" height="100"/></a>;}
@@ -32,6 +32,7 @@ function Home({planId,onPlans,guest=false}:{planId:string|null;onPlans:()=>void;
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [adminOpen,setAdminOpen] = useState(false);
+  const [setupFlow,setSetupFlow]=useState(new URLSearchParams(window.location.search).get("setup")==="1");
   const [saveStatus,setSaveStatus] = useState("");
   const [participantEmail,setParticipantEmail] = useState("");
   const [needsEmail,setNeedsEmail] = useState(false);
@@ -97,7 +98,7 @@ function Home({planId,onPlans,guest=false}:{planId:string|null;onPlans:()=>void;
       const res = await fetch("/api/state", { method: "POST", headers: {"Content-Type":"application/json"}, body: JSON.stringify({ name: form.get("name"), startDate: form.get("startDate"), endDate: form.get("endDate"), members: names }) });
       const data = await res.json() as {error?:string}; if (!res.ok) throw new Error(data.error || "Could not create the plan.");
       const created=data as {planId?:string};
-      if(created.planId)window.location.assign("/manage?plan="+created.planId);else await load();
+      if(created.planId)window.location.assign("/manage?plan="+created.planId+"&setup=1");else await load();
     } catch (e) { setError(e instanceof Error ? e.message : "Could not create the plan."); } finally { setSaving(false); }
   }
 
@@ -176,7 +177,7 @@ function Home({planId,onPlans,guest=false}:{planId:string|null;onPlans:()=>void;
       <section className="setup-card">
         <BrandLogo/>
         <h1>Find the date that works.</h1>
-        <button className="admin-link" onClick={onPlans}>Back to My plans</button><p className="intro">Administrator setup. Add names now, then add their emails in Event settings before sharing the group link.</p>
+        <button className="admin-link" onClick={onPlans}>Back to My plans</button><p className="intro">Step 1 of 2. Add your dates and names, then complete invitee details in Event Settings.</p>
         <form onSubmit={e=>{e.preventDefault();void createPlan(new FormData(e.currentTarget));}}>
           <label>What are you planning?<input name="name" required placeholder="October sailing weekend" /></label>
           <div className="date-row">
@@ -185,12 +186,13 @@ function Home({planId,onPlans,guest=false}:{planId:string|null;onPlans:()=>void;
           </div>
           <label>Who’s coming?<textarea name="members" required placeholder="Oliver, Charlotte, James, Sophie" /><span>Separate names with commas</span></label>
           {error && <p className="error">{error}</p>}
-          <button className="primary" disabled={saving}>{saving ? "Creating…" : "Create shared calendar"}<ChevronRight size={18}/></button>
+          <button className="primary" disabled={saving}>{saving ? "Creating…" : "Continue to Event Settings"}<ChevronRight size={18}/></button>
         </form>
       </section>
     </main>
   );
 
+  if(setupFlow&&state.viewer.isAdmin&&!state.event.archived)return <main className="app-shell"><BrandLogo/><p className="eyebrow">STEP 2 OF 2</p><AdminPanel state={state} onSave={adminSave} onDone={()=>{const url=new URL(window.location.href);url.searchParams.delete('setup');window.history.replaceState({},'',url);setSetupFlow(false);}}/></main>;
   const event = state.event;
   const activeName = state.members.find(m => m.id === selectedMember)?.name;
   const cells = monthDays(month);
@@ -238,7 +240,25 @@ function Home({planId,onPlans,guest=false}:{planId:string|null;onPlans:()=>void;
   );
 }
 
-function AdminPanel({state,onSave}:{state:AppState;onSave:(payload:unknown)=>Promise<void>}) {
+function AdminPanel({state,onSave,onDone}:{state:AppState;onSave:(payload:unknown)=>Promise<void>;onDone?:()=>void}) {
+  const panel=useRef<HTMLElement>(null);
+  async function finish(){
+    if(panel.current?.querySelector('form button:disabled')){setStatus('Please wait for the current save to finish.');return;}
+    const forms=Array.from(panel.current?.querySelectorAll('form')||[]);
+    const payloads:unknown[]=[];
+    for(const form of forms){
+      const data=new FormData(form);
+      if(form.classList.contains('admin-event-form')){if(!form.reportValidity())return;payloads.push({action:'event',name:data.get('name'),startDate:data.get('startDate'),endDate:data.get('endDate')});continue;}
+      const id=form.dataset.memberId;
+      const member=state.managedMembers?.find(m=>m.id===id);
+      if(!id&&!String(data.get('name')||'').trim()&&!String(data.get('email')||'').trim())continue;
+      if(!form.reportValidity())return;
+      if(member?.active!==0&&!String(data.get('email')||'').trim()){setStatus('Please add an email for each active invitee before opening the calendar.');return;}
+      if(!member||member.name!==data.get('name')||(member.email||'')!==data.get('email'))payloads.push({action:'member',id:id||undefined,name:data.get('name'),email:data.get('email'),active:member?!!member.active:true});
+    }
+    setBusy(true);setStatus('');
+    try{for(const payload of payloads)await onSave(payload);onDone?.();}catch(e){setStatus(e instanceof Error?e.message:'Could not save. Please retry.');}finally{setBusy(false);}
+  }
   const [status,setStatus]=useState("");
   const [busy,setBusy]=useState(false);
   async function saveEvent(form:FormData){
@@ -246,8 +266,8 @@ function AdminPanel({state,onSave}:{state:AppState;onSave:(payload:unknown)=>Pro
     try{await onSave({action:"event",name:form.get("name"),startDate:form.get("startDate"),endDate:form.get("endDate")});setStatus("Event saved. Existing responses have been kept.");}
     catch(e){setStatus(e instanceof Error?e.message:"Could not save.");}finally{setBusy(false);}
   }
-  return <section className="admin-panel">
-    <h2>Event settings</h2>
+  return <section className="admin-panel" ref={panel}><fieldset disabled={busy} style={{border:0,padding:0,margin:0,minWidth:0}}>
+    <h2>Event settings</h2>{onDone&&<p>Complete the names and email addresses below. When you’re ready, save your details and open the calendar.</p>}
     <p>Only you can change these settings. Shortening the date range hides responses outside it without deleting them.</p>
     <form onSubmit={e=>{e.preventDefault();void saveEvent(new FormData(e.currentTarget));}} className="admin-event-form">
       <label>Event name<input name="name" defaultValue={state.event?.name} required maxLength={120}/></label>
@@ -259,7 +279,8 @@ function AdminPanel({state,onSave}:{state:AppState;onSave:(payload:unknown)=>Pro
     <p>Add an email for each invitee, then copy the group link into WhatsApp. Invitees enter a listed email to open their record; no messages are sent automatically. This pilot does not verify ownership of an email. Your admin access remains separately protected.</p>
     <div className="member-editors">{state.managedMembers?.map(m=><MemberEditor key={m.id+":"+(m.email||"")+":"+m.active} member={m} onSave={onSave}/>)}</div>
     <h3>Add a member</h3><MemberEditor onSave={onSave}/>
-  </section>;
+    {onDone&&<button type="button" className="primary" disabled={busy} onClick={()=>void finish()}>{busy?'Saving…':'Done — open calendar'}<ChevronRight size={18}/></button>}
+  </fieldset></section>;
 }
 
 function MemberEditor({member,onSave}:{member?:Member;onSave:(payload:unknown)=>Promise<void>}) {
@@ -274,7 +295,7 @@ function MemberEditor({member,onSave}:{member?:Member;onSave:(payload:unknown)=>
     try{await onSave({action:"member",id:member.id,name:member.name,email:member.email,active:!member.active});}
     catch(e){setStatus(e instanceof Error?e.message:"Could not save.");}finally{setBusy(false);}
   }
-  return <form className="member-editor" onSubmit={e=>{e.preventDefault();void save(e.currentTarget);}}>
+  return <form className="member-editor" data-member-id={member?.id} onSubmit={e=>{e.preventDefault();void save(e.currentTarget);}}>
     <label>Name<input name="name" defaultValue={member?.name||""} required maxLength={80}/></label>
     <label>Invitee email<input name="email" type="email" defaultValue={member?.email||""} placeholder="name@example.com"/></label>
     <span className="member-status">{member?(member.active?(member.email?"Ready for email entry":"Email needed"):"Removed"):"New member"}</span>
@@ -358,6 +379,9 @@ function Plans({onOpen,onGuest}:{onOpen:(id:string)=>void;onGuest:()=>void}){
  {error&&<p className="error" role="alert">{error}<button onClick={()=>void load()}>Retry</button></p>}{loading?<p>Loading plans…</p>:<div className="plan-list">{plans.filter(p=>p.archived===archived).map(p=><article className="plan-card" key={p.id}><h2>{p.name}</h2><p>{parseLocal(p.startDate).toLocaleDateString('en-GB')} – {parseLocal(p.endDate).toLocaleDateString('en-GB')}</p><div className="account-actions"><button onClick={()=>onOpen(p.id)}>Open plan</button><button disabled={busy} onClick={()=>void archive(p)}>{p.archived?'Restore':'Archive'}</button></div></article>)}{!plans.some(p=>p.archived===archived)&&<p>{archived?'No archived plans.':'No active plans. Create a plan to get started.'}</p>}</div>}
  </main>;
 }
+
+
+
 
 
 
