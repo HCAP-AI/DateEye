@@ -1,6 +1,6 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "dateeye",
+  "name": "prod",
   "keep_vars": true,
   "main": "worker/index.ts",
   "compatibility_date": "2025-10-01",
