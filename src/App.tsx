@@ -1,5 +1,6 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { AccountPage, LegalPage, TERMS_VERSION } from './Legal';
 import { CalendarDays, Check, ChevronLeft, ChevronRight, Crown, Sparkles, Users, X } from "lucide-react";
 
 function BrandLogo(){return <a className="prod-logo" href="/" aria-label="prod. home"><img src="/prod-logo.png" alt="prod." width="220" height="100"/></a>;}
@@ -158,13 +159,15 @@ function Home({planId,onPlans,guest=false}:{planId:string|null;onPlans:()=>void;
   if (needsEmail) return <main className="setup-shell"><section className="setup-card">
     <BrandLogo/><h1>When are you free?</h1>
     <p className="intro">Please enter your email address</p>
-    <form onSubmit={e=>{e.preventDefault();const email=String(new FormData(e.currentTarget).get("email")||"").trim().toLowerCase();setError("");if(email===participantEmail)void load();else setParticipantEmail(email);}}>
+    <form onSubmit={e=>{e.preventDefault();void (async()=>{setError("");const form=new FormData(e.currentTarget);if(form.get('age')!=='adult'){setError('prod. is only for people aged 18 or over.');return;}try{const r=await window.fetch('/api/age-confirm',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({age:'adult',termsAccepted:form.get('termsAccepted')==='on'})});const d=await r.json();if(!r.ok)throw Error(d.error||'Please confirm you are 18 or over.');const email=String(form.get('email')||'').trim().toLowerCase();if(email===participantEmail)void load();else setParticipantEmail(email);}catch(err){setError(err instanceof Error?err.message:'Please try again.');}})();}}>
+      <label>Age range<select name="age" required defaultValue=""><option value="" disabled>Select</option><option value="under18">Under 18</option><option value="adult">18 or over</option></select></label>
       <label>Your email<input name="email" type="email" autoComplete="email" inputMode="email" autoCapitalize="none" spellCheck={false} defaultValue={participantEmail} required maxLength={254} placeholder="you@example.com"/></label>
+      <label className="terms-check"><input name="termsAccepted" type="checkbox" required/> I agree to the <a href="/terms#terms" target="_blank">Terms of Service</a> and acknowledge the <a href="/terms#privacy" target="_blank">Privacy Policy</a>.</label>
       {error&&<p className="error" role="alert">{error}</p>}
       <button className="primary" disabled={opening}>{opening?"Opening…":"Open calendar"}<ChevronRight size={18}/></button>
     </form>
     {invitations.length>0&&<div className="plan-list"><h2>Choose your event</h2>{invitations.map(p=><button key={p.id} onClick={()=>{setInvitations([]);setResolvedPlan(p.id);}}>{p.name}</button>)}</div>}
-    <p className="pilot-note">Test version: emails are not verified. Use your own email. Group members can see names and availability.</p>
+    <p className="pilot-note">Invitee emails are not yet verified. Use your own email and keep the plan link within your group. Group members can see names and availability.</p>
     <button className="admin-link" onClick={()=>setAdminLogin(true)}>Administrator sign-in</button>
   </section></main>;
 
@@ -208,7 +211,7 @@ function Home({planId,onPlans,guest=false}:{planId:string|null;onPlans:()=>void;
         {state.viewer.isAdmin&&<button onClick={async()=>{const r=await fetch("/api/logout",{method:"POST",headers:{"Content-Type":"application/json"},body:"{}"});if(r.ok){setParticipantEmail("");setState(null);setNeedsEmail(true);setAdminOpen(false);}else setError("Could not sign out. Please retry.");}}>Sign out</button>}
         {state.viewer.isAdmin&&!event.archived&&<button onClick={()=>setAdminOpen(!adminOpen)} aria-expanded={adminOpen}>{adminOpen?"Close settings":"Event settings"}</button>}
         <button disabled={saving} onClick={()=>{setState(null);setNeedsEmail(true);setError("");setAdminOpen(false);}}> {state.viewer.isAdmin?"Preview invitee entry":"Change email"}</button>
-        <button onClick={async()=>{try{await navigator.clipboard.writeText(window.location.origin+"/?plan="+state.event!.id);setShareStatus("Group link copied — paste it into WhatsApp.");}catch{setShareStatus("Copy this group link: "+window.location.origin+"/?plan="+state.event!.id);}}}>Copy group link</button>
+        <button onClick={async()=>{try{await navigator.clipboard.writeText("You’re invited to "+state.event!.name+" on prod. Let us know when you’re free: "+window.location.origin+"/?plan="+state.event!.id+"\nPrivacy information: "+window.location.origin+"/terms#privacy");setShareStatus("Invitation and privacy link copied — send it to each invitee.");}catch{setShareStatus("Copy this group link: "+window.location.origin+"/?plan="+state.event!.id);}}}>Copy invitation</button>
       </div></div>
       {event.archived&&<p className="share-status">This plan is archived. Restore it from My plans to make changes.</p>}
       {shareStatus&&<p className="share-status" role="status">{shareStatus}</p>}
@@ -276,7 +279,7 @@ function AdminPanel({state,onSave,onDone}:{state:AppState;onSave:(payload:unknow
       <button className="primary" disabled={busy}>{busy?"Saving…":"Save event"}</button>
     </form><p role="status">{status}</p>
     <h3>Members</h3>
-    <p>Add an email for each invitee, then copy the group link into WhatsApp. Invitees enter a listed email to open their record; no messages are sent automatically. This pilot does not verify ownership of an email. Your admin access remains separately protected.</p>
+    <p>Add an email for each invitee, then copy the invitation and send it to each person. It includes our privacy notice. Invitees enter a listed email to open their record; no messages are sent automatically. This pilot does not verify ownership of an email. Your admin access remains separately protected.</p>
     <div className="member-editors">{state.managedMembers?.map(m=><MemberEditor key={m.id+":"+(m.email||"")+":"+m.active} member={m} onSave={onSave}/>)}</div>
     <h3>Add a member</h3><MemberEditor onSave={onSave}/>
     {onDone&&<button type="button" className="primary" disabled={busy} onClick={()=>void finish()}>{busy?'Saving…':'Done — open calendar'}<ChevronRight size={18}/></button>}
@@ -324,13 +327,15 @@ export default function App(){
  const manage=url.pathname==='/manage';
  const open=(id:string)=>navigate('/manage?plan='+id);
  let page;
- if(url.pathname==='/auth/confirmed')page=<ConfirmationReturn onReady={()=>navigate('/manage?plan=new')}/>;
+ if(url.pathname==='/terms')page=<LegalPage/>;
+ else if(url.pathname==='/account')page=<AccountPage/>;
+ else if(url.pathname==='/auth/confirmed')page=<ConfirmationReturn onReady={()=>navigate('/manage?plan=new')}/>;
  else if(manage)page=<InviterGate key="manage" onReady={()=>{}}>{plan?<Home key={plan} planId={plan} onPlans={()=>navigate('/manage')}/>:<Plans onOpen={open} onGuest={()=>navigate('/signin')}/>}</InviterGate>;
  else if(url.pathname==='/register'||url.pathname==='/signin')page=<InviterGate key={url.pathname} register={url.pathname==='/register'} onReady={()=>navigate(url.pathname==='/register'?'/manage?plan=new':'/manage')}/>;
  else if(url.pathname==='/admin')page=<AdminLogin onDone={()=>navigate('/manage')} onBack={()=>navigate('/')}/>;
  else if(plan||url.pathname==='/respond')page=<Home key={plan||'guest'} guest planId={plan} onPlans={()=>navigate('/manage')}/>;
  else page=<main className="landing"><BrandLogo/><section className="landing-intro"><p className="eyebrow">LESS BACK AND FORTH. MORE GETTING TOGETHER.</p><h1>Good plans start<br/>with a little prod.</h1><p>Bring your people together. Find a date that works.</p></section><div className="landing-choices"><section><CalendarDays size={30}/><h2>Make a plan</h2><p>A catch-up, a weekend away, or something worth getting everyone together for.</p><button className="primary" onClick={()=>navigate('/register')}>Create an event <ChevronRight size={18}/></button><button className="admin-link" onClick={()=>navigate('/signin')}>Already registered? Sign in</button></section><section><Users size={30}/><h2>Been invited?</h2><p>Let your friends know when you’re free and get the plan moving.</p><button className="primary guest-cta" onClick={()=>navigate('/respond')}>Respond to an invitation <ChevronRight size={18}/></button><p className="landing-hint">Have an event link? Open it to go straight to your event.</p></section></div></main>;
- return <div className="site-frame"><div className="site-content">{page}</div><footer className="site-footer"><BrandLogo/><small>© Hound Capital Ltd 2026</small><a href="mailto:office@hound-capital.com" className="help-button">Help!</a></footer></div>;
+ return <div className="site-frame"><div className="site-content">{page}</div><footer className="site-footer"><BrandLogo/><small>© Hound Capital Ltd 2026</small><a href="/terms">terms.</a><a href="mailto:office@hound-capital.com" className="help-button">Help!</a></footer></div>;
 }
 
 function ConfirmationReturn({onReady}:{onReady:()=>void}){
@@ -347,24 +352,26 @@ function ConfirmationReturn({onReady}:{onReady:()=>void}){
 
 function InviterGate({children,register=false,onReady,confirmedEmail=''}:{children?:React.ReactNode;register?:boolean;onReady:()=>void;confirmedEmail?:string}){
  const [stage,setStage]=useState(confirmedEmail?'code':'loading'),[email,setEmail]=useState(confirmedEmail),[error,setError]=useState(''),[busy,setBusy]=useState(false);
- const [details,setDetails]=useState({name:'',sex:'',ageRange:''});
+ const [details,setDetails]=useState({name:'',sex:'',ageRange:'',termsVersion:TERMS_VERSION,termsAccepted:false});
  async function api(path:string,data?:unknown){const r=await window.fetch(path,data===undefined?{cache:'no-store'}:{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});const d=await r.json();if(!r.ok)throw Error(d.error||'Please try again.');return d;}
- async function check(){try{const d=await api('/api/profile');setEmail(d.email);if(d.profile){setStage('ready');if(!children)onReady();}else setStage('profile');}catch{setStage(register?'register':'email');}}
+ async function check(){try{const d=await api('/api/profile');setEmail(d.email);if(d.profile){if(d.termsVersion!==TERMS_VERSION)setStage('terms');else{setStage('ready');if(!children)onReady();}}else setStage('profile');}catch{setStage(register?'register':'email');}}
  useEffect(()=>{if(!confirmedEmail)void check();},[]);
  async function submit(form:FormData){setBusy(true);setError('');try{
- if(stage==='register'||stage==='email'){const e=String(form.get('email')).trim();setEmail(e);if(stage==='register')setDetails({name:String(form.get('name')),sex:String(form.get('sex')),ageRange:String(form.get('ageRange'))});await api('/api/send-code',{email:e,...(stage==='register'?{profile:{name:String(form.get('name')),sex:String(form.get('sex')),ageRange:String(form.get('ageRange'))}}:{})});setStage(stage==='register'?'confirmation':'code');}
+ if(stage==='register'||stage==='email'){const e=String(form.get('email')).trim();setEmail(e);if(stage==='register'){if(!['18–24','25–34','35–44','45–54','55–64','65+'].includes(String(form.get('ageRange'))))throw Error('You must be 18 or over to register. No email has been sent.');if(form.get('termsAccepted')!=='on')throw Error('Please agree to the Terms.');setDetails({name:String(form.get('name')),sex:String(form.get('sex')),ageRange:String(form.get('ageRange')),termsVersion:TERMS_VERSION,termsAccepted:true});}await api('/api/send-code',{email:e,...(stage==='register'?{profile:{name:String(form.get('name')),sex:String(form.get('sex')),ageRange:String(form.get('ageRange')),termsVersion:TERMS_VERSION,termsAccepted:true}}:{})});setStage(stage==='register'?'confirmation':'code');}
  else if(stage==='code'){await api('/api/verify-code',{email,code:String(form.get('code')).trim()});if(details.name){try{await api('/api/profile',details);}catch(e){setStage('profile');throw e;}}await check();}
- else if(stage==='profile'){await api('/api/profile',{name:form.get('name'),sex:form.get('sex'),ageRange:form.get('ageRange')});setStage('ready');if(!children)onReady();}
+ else if(stage==='profile'){await api('/api/profile',{name:form.get('name'),sex:form.get('sex'),ageRange:form.get('ageRange'),termsVersion:TERMS_VERSION,termsAccepted:form.get('termsAccepted')==='on'});setStage('ready');if(!children)onReady();}
+ else if(stage==='terms'){await api('/api/accept-terms',{termsVersion:TERMS_VERSION,termsAccepted:form.get('termsAccepted')==='on'});setStage('ready');if(!children)onReady();}
  }catch(e){setError(e instanceof Error?e.message:'Please try again.');}finally{setBusy(false);}}
  if(stage==='confirmation')return <main className="setup-shell"><section className="setup-card"><BrandLogo/><h1>Check your email</h1><p>Open the confirmation link sent to {email}. Once confirmed, we’ll send your sign-in code automatically.</p><p>Already registered? Your email may contain a sign-in code instead.</p><button className="primary" onClick={()=>setStage('code')}>Enter a sign-in code</button><button className="admin-link" onClick={()=>setStage('register')}>Change details or resend</button></section></main>;
  if(stage==='ready')return <>{children||<p className="center">Opening your event…</p>}</>;
  if(stage==='loading')return <p className="center">Opening your account…</p>;
- return <main className="setup-shell"><section className="setup-card"><BrandLogo/><h1>{stage==='code'?'Check your email':stage==='profile'?'Your details':stage==='register'?'Let’s make a plan.':'Welcome back.'}</h1><p className="intro">{stage==='code'?`Enter the sign-in code sent to ${email}.`:stage==='register'?'Register once, then create your event.':stage==='profile'?'Complete your details before creating an event.':'Enter your email and we’ll send you a sign-in code.'}</p><form onSubmit={e=>{e.preventDefault();void submit(new FormData(e.currentTarget));}}>
+ return <main className="setup-shell"><section className="setup-card"><BrandLogo/><h1>{stage==='terms'?'Updated terms':stage==='code'?'Check your email':stage==='profile'?'Your details':stage==='register'?'Let’s make a plan.':'Welcome back.'}</h1><p className="intro">{stage==='code'?`Enter the sign-in code sent to ${email}.`:stage==='register'?'Register once, then create your event.':stage==='profile'?'Complete your details before creating an event.':'Enter your email and we’ll send you a sign-in code.'}</p><form onSubmit={e=>{e.preventDefault();void submit(new FormData(e.currentTarget));}}>
  {(stage==='register'||stage==='profile')&&<><label>Name<input name="name" autoComplete="name" maxLength={80} required defaultValue={details.name}/></label></>}
  {(stage==='register'||stage==='email')&&<label>Email<input name="email" type="email" autoComplete="email" required maxLength={254} defaultValue={email}/></label>}
  {(stage==='register'||stage==='profile')&&<><label>Sex<select name="sex" required defaultValue={details.sex}><option value="" disabled>Select</option>{['Female','Male','Intersex','Prefer not to say'].map(x=><option key={x}>{x}</option>)}</select></label><label>Age range<select name="ageRange" required defaultValue={details.ageRange}><option value="" disabled>Select</option>{['Under 18','18–24','25–34','35–44','45–54','55–64','65+','Prefer not to say'].map(x=><option key={x}>{x}</option>)}</select></label><p className="pilot-note">Your registration details are private and are not shown to invitees.</p></>}
+ {(stage==='register'||stage==='profile'||stage==='terms')&&<label className="terms-check"><input name="termsAccepted" type="checkbox" required/> I agree to the <a href="/terms#terms" target="_blank">Terms of Service</a> and acknowledge the <a href="/terms#privacy" target="_blank">Privacy Policy</a>.</label>}
  {stage==='code'&&<label>Sign-in code<input name="code" inputMode="numeric" autoComplete="one-time-code" pattern="[0-9]{6,10}" required maxLength={10}/></label>}
- {error&&<p className="error" role="alert">{error}</p>}<button className="primary" disabled={busy}>{busy?'Please wait…':stage==='code'?'Verify email':stage==='profile'?'Continue to event':stage==='register'?'Register':'Send sign-in code'}</button></form>
+ {error&&<p className="error" role="alert">{error}</p>}<button className="primary" disabled={busy}>{busy?'Please wait…':stage==='code'?'Verify email':stage==='profile'?'Continue to event':stage==='register'?'Register':stage==='terms'?'Agree and continue':'Send sign-in code'}</button></form>
  {stage==='code'&&<button className="admin-link" disabled={busy} onClick={()=>{setError('');setStage(details.name?'register':'email');}}>Change email or request another code</button>}
  <a className="admin-link" href="/">Back to home</a><a className="admin-link" href="/admin">Existing administrator password sign-in</a></section></main>;
 }

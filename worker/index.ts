@@ -4,7 +4,8 @@ export interface Env {
  SUPABASE_URL:string; SUPABASE_PUBLISHABLE_KEY:string; SUPABASE_SECRET_KEY:string; ADMIN_EMAIL:string;
  ASSETS:{fetch:(r:Request)=>Promise<Response>};
 }
-const COOKIE='dateeye_admin';
+const COOKIE='prod_session';
+const ADULT_COOKIE='prod_adult';
 const json=(data:unknown,status=200,headers:Record<string,string>={})=>Response.json(data,{status,headers:{'Cache-Control':'no-store',...headers}});
 function cookie(request:Request){return request.headers.get('cookie')?.split(';').map(x=>x.trim()).find(x=>x.startsWith(COOKIE+'='))?.slice(COOKIE.length+1)||'';}
 function cookieValue(request:Request,value:string,seconds:number){return `${COOKIE}=${value}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${seconds}${new URL(request.url).protocol==='https:'?'; Secure':''}`;}
@@ -28,7 +29,13 @@ export default {async fetch(request:Request,env:Env):Promise<Response>{
  const path=new URL(request.url).pathname;
  if(!path.startsWith('/api/'))return env.ASSETS.fetch(request);
  try{
+  if(path==='/api/age-confirm'&&request.method==='POST'){
+   const b=await body(request);
+   if(b.age!=='adult'||b.termsAccepted!==true)throw new AccessError('prod. is only for people aged 18 or over.',403);
+   return json({ok:true},200,{'Set-Cookie':`${ADULT_COOKIE}=1; Path=/api/; HttpOnly; SameSite=Strict; Max-Age=3600${new URL(request.url).protocol==='https:'?'; Secure':''}`});
+  }
   if(path==='/api/invitations'&&request.method==='POST'){
+   if(!request.headers.get('cookie')?.split(';').some(x=>x.trim()===ADULT_COOKIE+'=1'))throw new AccessError('Please confirm you are 18 or over.',403);
    const b=await body(request);const email=String(b.email||'').trim().toLowerCase();
    if(email.length>254||!/^\S+@[^\s@]+\.[^\s@]+$/.test(email))throw new AccessError('Please enter a valid email.',400);
    const r=await supa(env,'/rest/v1/rpc/prod_invitations',{method:'POST',body:JSON.stringify({p_email:email})},true);
@@ -38,6 +45,10 @@ export default {async fetch(request:Request,env:Env):Promise<Response>{
   if(path==='/api/send-code'&&request.method==='POST'){
    const b=await body(request);const email=String(b.email||'').trim().toLowerCase();
    if(email.length>254||!/^\S+@[^\s@]+\.[^\s@]+$/.test(email))throw new AccessError('Please enter a valid email.',400);
+   if(b.profile){const p=b.profile as Record<string,unknown>;
+    if(!['18–24','25–34','35–44','45–54','55–64','65+'].includes(String(p.ageRange)))throw new AccessError('You must be 18 or over to register.',403);
+    if(p.termsVersion!=='2026-09-27'||p.termsAccepted!==true)throw new AccessError('Please agree to the Terms of Service.',400);
+   }
    const r=await supa(env,'/auth/v1/otp?redirect_to='+encodeURIComponent(new URL(request.url).origin+'/auth/confirmed'),{method:'POST',body:JSON.stringify({email,create_user:true,...(b.profile?{data:{prod_profile:b.profile}}:{})})});
    if(!r.ok)throw new AccessError(r.status===429?'Please wait before requesting another code.':'Could not send a code. Please try again.',r.status===429?429:502);
    return json({ok:true});
@@ -82,6 +93,28 @@ export default {async fetch(request:Request,env:Env):Promise<Response>{
    if(!r.ok)throw new AccessError(r.status===400?'Please check your name, sex and age range.':'Registration could not be saved. Check the database upgrade.',400);
    return json(data);
   }
+  if(path==='/api/accept-terms'&&request.method==='POST'){
+   const b=await body(request);if(b.termsVersion!=='2026-09-27'||b.termsAccepted!==true)throw new AccessError('Please agree to the current Terms.',400);
+   const token=cookie(request);if(!token)throw new AccessError('Please sign in.',401);
+   const auth=await supa(env,'/auth/v1/user',{headers:{Authorization:'Bearer '+token}});
+   if(!auth.ok)throw new AccessError('Please sign in again.',401);
+   const u=await auth.json() as {id:string;email_confirmed_at?:string};if(!u.email_confirmed_at)throw new AccessError('Please verify your email.',403);
+   const r=await supa(env,'/rest/v1/rpc/prod_accept_terms',{method:'POST',body:JSON.stringify({p_user:u.id,p_version:b.termsVersion})},true);
+   if(!r.ok)throw new AccessError('Could not record acceptance. Please contact support.',502);
+   return json({ok:true});
+  }
+  if(path==='/api/delete-account'&&request.method==='POST'){
+   const b=await body(request);if(b.confirm!=='DELETE')throw new AccessError('Type DELETE to confirm.',400);
+   const token=cookie(request);if(!token)throw new AccessError('Please sign in.',401);
+   const auth=await supa(env,'/auth/v1/user',{headers:{Authorization:'Bearer '+token}});
+   if(!auth.ok)throw new AccessError('Please sign in again.',401);
+   const u=await auth.json() as {id:string;email_confirmed_at?:string};if(!u.email_confirmed_at)throw new AccessError('Please verify your email.',403);
+   const purge=await supa(env,'/rest/v1/rpc/prod_delete_account',{method:'POST',body:JSON.stringify({p_user:u.id})},true);
+   if(!purge.ok)throw new AccessError('Could not delete your plans. Please contact support.',502);
+   const deleted=await supa(env,'/auth/v1/admin/users/'+encodeURIComponent(u.id),{method:'DELETE'},true);
+   if(!deleted.ok&&deleted.status!==404)throw new AccessError('Your plans were removed, but account deletion needs support. Please contact us.',502);
+   return json({ok:true},200,{'Set-Cookie':cookieValue(request,'',0)});
+  }
   if(path==='/api/logout'&&request.method==='POST'){
    await body(request);const token=cookie(request);
    if(token){const r=await supa(env,'/auth/v1/logout',{method:'POST',headers:{Authorization:'Bearer '+token}});if(!r.ok&&r.status!==401&&r.status!==403)throw new AccessError('Could not sign out. Please retry.',502);}
@@ -107,6 +140,7 @@ export default {async fetch(request:Request,env:Env):Promise<Response>{
   if(b.planId && b.planId!=='new' && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(b.planId)))throw new AccessError('Invalid plan link.',400);
   const entry=request.headers.get('x-dateeye-email');let email:string|null=null,user:string|null=null;
   if(entry!==null){
+   if(!request.headers.get('cookie')?.split(';').some(x=>x.trim()===ADULT_COOKIE+'=1'))throw new AccessError('Please confirm you are 18 or over.',403);
    email=entry.trim().toLowerCase();if(!email||email.length>254||!/^\S+@[^\s@]+\.[^\s@]+$/.test(email))throw new AccessError('Please enter a valid email.',400);
    // Invitee entry takes precedence over any admin cookie, even for the admin email.
   }else{
