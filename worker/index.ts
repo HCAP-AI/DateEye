@@ -38,6 +38,11 @@ export default {async fetch(request:Request,env:Env):Promise<Response>{
   if(path==='/api/send-code'&&request.method==='POST'){
    const b=await body(request);const email=String(b.email||'').trim().toLowerCase();
    if(email.length>254||!/^\S+@[^\s@]+\.[^\s@]+$/.test(email))throw new AccessError('Please enter a valid email.',400);
+   if(b.profile){
+    const p=b.profile as Record<string,unknown>;
+    if(p.ageRange==='Under 18'||p.ageRange==='Prefer not to say')throw new AccessError('You must be 18 or over to register.',403);
+    if(p.termsVersion!=='2026-09-27'||p.termsAccepted!==true)throw new AccessError('Please agree to the Terms of Service.',400);
+   }
    const r=await supa(env,'/auth/v1/otp?redirect_to='+encodeURIComponent(new URL(request.url).origin+'/auth/confirmed'),{method:'POST',body:JSON.stringify({email,create_user:true,...(b.profile?{data:{prod_profile:b.profile}}:{})})});
    if(!r.ok)throw new AccessError(r.status===429?'Please wait before requesting another code.':'Could not send a code. Please try again.',r.status===429?429:502);
    return json({ok:true});
@@ -81,6 +86,20 @@ export default {async fetch(request:Request,env:Env):Promise<Response>{
    const data=await r.json() as {message?:string};
    if(!r.ok)throw new AccessError(r.status===400?'Please check your name, sex and age range.':'Registration could not be saved. Check the database upgrade.',400);
    return json(data);
+  }
+  if(path==='/api/delete-account'&&request.method==='POST'){
+   const b=await body(request);
+   if(b.confirm!=='DELETE')throw new AccessError('Type DELETE to confirm account deletion.',400);
+   const token=cookie(request);if(!token)throw new AccessError('Please sign in.',401);
+   const auth=await supa(env,'/auth/v1/user',{headers:{Authorization:'Bearer '+token}});
+   if(!auth.ok)throw new AccessError('Please sign in again.',401);
+   const u=await auth.json() as {id:string;email_confirmed_at?:string};
+   if(!u.email_confirmed_at)throw new AccessError('Please verify your email.',403);
+   const purge=await supa(env,'/rest/v1/rpc/prod_delete_account',{method:'POST',body:JSON.stringify({p_user:u.id})},true);
+   if(!purge.ok)throw new AccessError('Could not delete your plans. Please contact support.',502);
+   const deleted=await supa(env,'/auth/v1/admin/users/'+encodeURIComponent(u.id),{method:'DELETE'},true);
+   if(!deleted.ok&&deleted.status!==404)throw new AccessError('Your plans were deleted, but account removal needs support. Please contact us.',502);
+   return json({ok:true},200,{'Set-Cookie':cookieValue(request,'',0)});
   }
   if(path==='/api/logout'&&request.method==='POST'){
    await body(request);const token=cookie(request);
@@ -131,6 +150,5 @@ export default {async fetch(request:Request,env:Env):Promise<Response>{
   return json(result,request.method==='POST'?201:200);
  }catch(e){return json({error:e instanceof AccessError?e.message:'Service temporarily unavailable. Please retry.'},e instanceof AccessError?e.status:503);}
 }};
-
 
 
