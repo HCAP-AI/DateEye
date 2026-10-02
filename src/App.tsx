@@ -1,6 +1,6 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import {PhoneEntry,PhonePreferences,SmsInvitations,AddFromContacts,phoneApi} from './PhoneEntry';
+import {AddFromContacts,phoneApi} from './PhoneEntry';
 import { AccountPage, LegalPage, TERMS_VERSION } from './Legal';
 import { CalendarDays, Check, ChevronLeft, ChevronRight, Crown, Sparkles, Users, X } from "lucide-react";
 
@@ -36,31 +36,27 @@ function Home({planId,onPlans,guest=false}:{planId:string|null;onPlans:()=>void;
   const [adminOpen,setAdminOpen] = useState(false);
   const [setupFlow,setSetupFlow]=useState(new URLSearchParams(window.location.search).get("setup")==="1");
   const [saveStatus,setSaveStatus] = useState("");
-  const [phoneVerified,setPhoneVerified]=useState(false);
-  const [phoneRefresh,setPhoneRefresh]=useState(0);
-  const [phoneNotice,setPhoneNotice]=useState('');
-  const [entryMode,setEntryMode]=useState(new URLSearchParams(window.location.search).get('via')==='sms'?'sms':'email');
   const [participantEmail,setParticipantEmail] = useState("");
   const [needsEmail,setNeedsEmail] = useState(false);
   const [opening,setOpening] = useState(false);
   const [shareStatus,setShareStatus] = useState("");
-  const participantHeaders:Record<string,string> = phoneVerified ? {"x-prod-phone-session":"1"} : participantEmail ? {"x-dateeye-email":participantEmail} : {};
+  const participantHeaders:Record<string,string> = participantEmail ? {"x-prod-contact":participantEmail} : {};
 
   const load = useCallback(async () => {
-    if(guest&&!participantEmail&&!phoneVerified){setNeedsEmail(true);return;}
+    if(guest&&!participantEmail){setNeedsEmail(true);return;}
     setOpening(true);
     try {
-      if(guest&&!resolvedPlan&&(participantEmail||phoneVerified)){
-        const r=await window.fetch(phoneVerified?'/api/phone/invitations':'/api/invitations',phoneVerified?{cache:'no-store'}:{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:participantEmail})});
-        const d=await r.json();if(!r.ok){if(phoneVerified&&r.status===401)setPhoneVerified(false);throw Error(d.error||'Could not find invitations.');}
+      if(guest&&!resolvedPlan&&participantEmail){
+        const r=await window.fetch('/api/guest/invitations',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({contact:participantEmail})});
+        const d=await r.json();if(!r.ok){throw Error(d.error||'Could not find invitations.');}
         if(d.plans.length===1){setResolvedPlan(d.plans[0].id);return;}
         setInvitations(d.plans);setNeedsEmail(true);setError(d.plans.length?'':'No active invitations found for these details.');return;
       }
       const res = await fetch("/api/state", { cache: "no-store", headers:participantHeaders });
       const data = await res.json() as AppState & {error?:string};
       if(res.status===401||res.status===403) {
-        setState(null); setNeedsEmail(true);if(res.status===401)setPhoneVerified(false);
-        setError((participantEmail||phoneVerified) ? data.error || "Please check your email." : "");
+        setState(null); setNeedsEmail(true);
+        setError(participantEmail ? data.error || "Please check your invited contact details." : "");
         return;
       }
       if (!res.ok) throw new Error(data.error || "Could not load the calendar.");
@@ -69,9 +65,9 @@ function Home({planId,onPlans,guest=false}:{planId:string|null;onPlans:()=>void;
       if (data.event) setMonth(parseLocal(data.event.startDate));
       setSelectedMember(data.viewer.memberId || "");
       setError("");
-    } catch (e) { if(phoneVerified){setState(null);setNeedsEmail(true);}setError(e instanceof Error ? e.message : "Could not load the calendar."); }
+    } catch (e) { if(guest){setState(null);setNeedsEmail(true);}setError(e instanceof Error ? e.message : "Could not load the calendar."); }
     finally {setOpening(false);}
-  }, [participantEmail,guest,resolvedPlan,phoneVerified,phoneRefresh]);
+  }, [participantEmail,guest,resolvedPlan]);
 
   useEffect(() => { void load(); }, [load]);
 
@@ -157,25 +153,22 @@ function Home({planId,onPlans,guest=false}:{planId:string|null;onPlans:()=>void;
       }
     },{signal:lifecycle.signal})).catch(()=>{});
     return () => lifecycle.abort();
-  }, [state?.event, state?.members, state?.viewer.memberId, participantEmail, phoneVerified, load]);
+  }, [state?.event, state?.members, state?.viewer.memberId, participantEmail, load]);
 
   if (adminLogin) return <AdminLogin onDone={()=>{setAdminLogin(false);setParticipantEmail("");window.location.assign("/manage"+(resolvedPlan?"?plan="+resolvedPlan:""));}} onBack={()=>{setAdminLogin(false);window.history.replaceState({},"","/");}}/>;
 
   if (needsEmail) return <main className="setup-shell"><section className="setup-card">
     <BrandLogo/><h1>When are you free?</h1>
-    <div className="account-actions"><button aria-pressed={entryMode==='email'} onClick={()=>{setParticipantEmail('');setPhoneVerified(false);setEntryMode('email');}}>Email</button><button aria-pressed={entryMode==='sms'} onClick={()=>{setParticipantEmail('');setEntryMode('sms');}}>Mobile number</button></div>
-    {entryMode==='sms'?<>{error&&<p className="error" role="alert">{error}</p>}{phoneNotice&&<p role="status">{phoneNotice}</p>}{phoneVerified?<><p>{opening?'Mobile number verified. Opening your calendar…':'Your mobile number is verified.'}</p>{!opening&&<><button className="primary" onClick={()=>setPhoneRefresh(v=>v+1)}>Retry opening calendar</button>{resolvedPlan&&<button className="admin-link" onClick={()=>{setResolvedPlan(null);setPhoneRefresh(v=>v+1);}}>Choose another event</button>}</>}<PhonePreferences/></>:<PhoneEntry planId={resolvedPlan} onDone={(notice='')=>{setParticipantEmail('');setError('');setPhoneNotice(notice);setPhoneVerified(true);setPhoneRefresh(v=>v+1);}}/>}</>:<>
-    <p className="intro">Please enter your email address to get to the calendar and share your availability.</p>
+    <p className="intro">Enter the email address or mobile number your organiser invited. No verification code is needed.</p>
     <form onSubmit={e=>{e.preventDefault();void (async()=>{setError("");const form=new FormData(e.currentTarget);if(form.get('age')!=='adult'){setError('prod. is only for people aged 18 or over.');return;}try{const r=await window.fetch('/api/age-confirm',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({age:'adult',termsAccepted:form.get('termsAccepted')==='on'})});const d=await r.json();if(!r.ok)throw Error(d.error||'Please confirm you are 18 or over.');const email=String(form.get('email')||'').trim().toLowerCase();if(email===participantEmail)void load();else setParticipantEmail(email);}catch(err){setError(err instanceof Error?err.message:'Please try again.');}})();}}>
-      <label>Your email<input name="email" type="email" autoComplete="email" inputMode="email" autoCapitalize="none" spellCheck={false} defaultValue={participantEmail} required maxLength={254} placeholder="you@example.com"/></label>
+      <label>Your email or mobile number<input name="email" type="text" autoComplete="username" autoCapitalize="none" spellCheck={false} defaultValue={participantEmail} required maxLength={254} placeholder="you@example.com or 07700 900123"/></label>
       <label>Age<select name="age" required defaultValue=""><option value="" disabled>Select</option><option value="under18">Under 18</option><option value="adult">18 or over</option></select></label>
       <label className="terms-check"><input name="termsAccepted" type="checkbox" required/><span className="terms-check-copy">I agree to the <a href="/terms#terms" target="_blank" rel="noopener noreferrer">Terms of Service</a> and acknowledge the <a href="/terms#privacy" target="_blank" rel="noopener noreferrer">Privacy Policy</a>.</span></label>
       {error&&<p className="error" role="alert">{error}</p>}
       <button className="primary" disabled={opening}>{opening?"Opening…":"Open calendar"}<ChevronRight size={18}/></button>
     </form>
-    </>}
     {invitations.length>0&&<div className="plan-list"><h2>Choose your event</h2>{invitations.map(p=><button key={p.id} onClick={()=>{setInvitations([]);setResolvedPlan(p.id);}}>{p.name}</button>)}</div>}
-    <p className="pilot-note">Mobile numbers are verified by text code. Email entry keeps the existing pilot flow. Group members can see names and availability.</p>
+    <p className="pilot-note">Only invited contact details can open an event. Group members can see names and availability.</p>
     <button className="admin-link" onClick={()=>setAdminLogin(true)}>Administrator sign-in</button>
   </section></main>;
 
@@ -218,7 +211,7 @@ function Home({planId,onPlans,guest=false}:{planId:string|null;onPlans:()=>void;
         {state.viewer.isAdmin&&<button onClick={onPlans}>My plans</button>}
         {state.viewer.isAdmin&&<button onClick={async()=>{const r=await fetch("/api/logout",{method:"POST",headers:{"Content-Type":"application/json"},body:"{}"});if(r.ok){setParticipantEmail("");setState(null);setNeedsEmail(true);setAdminOpen(false);}else setError("Could not sign out. Please retry.");}}>Sign out</button>}
         {state.viewer.isAdmin&&!event.archived&&<button onClick={()=>setAdminOpen(!adminOpen)} aria-expanded={adminOpen}>{adminOpen?"Close settings":"Event settings"}</button>}
-        <button disabled={saving} onClick={async()=>{try{if(phoneVerified)await phoneApi("/api/phone/logout",{});setPhoneVerified(false);setParticipantEmail("");setState(null);setNeedsEmail(true);setError("");setAdminOpen(false);}catch{setError("Could not change sign-in details. Please retry.");}}}> {state.viewer.isAdmin?"Preview invitee entry":"Change sign-in details"}</button>
+        <button disabled={saving} onClick={async()=>{try{setParticipantEmail("");setState(null);setNeedsEmail(true);setError("");setAdminOpen(false);}catch{setError("Could not change sign-in details. Please retry.");}}}> {state.viewer.isAdmin?"Preview invitee entry":"Change sign-in details"}</button>
         <button onClick={async()=>{try{await navigator.clipboard.writeText("You’re invited to "+state.event!.name+" on prod. Let us know when you’re free: "+window.location.origin+"/?plan="+state.event!.id+"\nPrivacy information: "+window.location.origin+"/terms#privacy");setShareStatus("Invitation and privacy link copied — send it to each invitee.");}catch{setShareStatus("Copy this group link: "+window.location.origin+"/?plan="+state.event!.id);}}}>Copy invitation</button>
       </div></div>
       {event.archived&&<p className="share-status">This plan is archived. Restore it from My plans to make changes.</p>}
@@ -247,14 +240,16 @@ function Home({planId,onPlans,guest=false}:{planId:string|null;onPlans:()=>void;
           <div className="response-progress"><div><span>Responses</span><strong>{new Set(state.availability.map(a=>a.memberId)).size}/{total}</strong></div><div className="progress"><i style={{width:`${new Set(state.availability.map(a=>a.memberId)).size/total*100}%`}}/></div><p role="status">{saveStatus || (activeName ? activeName+", your changes save automatically." : "Only your own responses can be edited.")}</p></div>
         </aside>
       </div>
-      {phoneVerified&&<>{phoneNotice&&<p role="status">{phoneNotice}</p>}<PhonePreferences/></>}
+
     </main>
   );
 }
 
 function AdminPanel({state,onSave,onDone}:{state:AppState;onSave:(payload:unknown)=>Promise<void>;onDone?:()=>void}) {
   const panel=useRef<HTMLElement>(null);
-  async function finish(){
+  const finishing=useRef(false);
+  async function finish(sendInvites=false){
+    if(finishing.current)return;
     if(panel.current?.querySelector('form button:disabled')){setStatus('Please wait for the current save to finish.');return;}
     const forms=Array.from(panel.current?.querySelectorAll('form')||[]);
     const payloads:unknown[]=[];
@@ -265,11 +260,28 @@ function AdminPanel({state,onSave,onDone}:{state:AppState;onSave:(payload:unknow
       const member=state.managedMembers?.find(m=>m.id===id);
       if(!id&&!String(data.get('name')||'').trim()&&!String(data.get('email')||'').trim()&&!String(data.get('phone')||'').trim())continue;
       if(!form.reportValidity())return;
-      if(member?.active!==0&&!String(data.get(data.get('notification')==='sms'?'phone':'email')||'').trim()){setStatus('Please add the chosen email or mobile number for each active invitee.');return;}
+      if(member?.active!==0&&!String(data.get('email')||data.get('phone')||'').trim()){setStatus('Please add an email address or mobile number for each active invitee.');return;}
       if(!member||member.name!==data.get('name')||(member.email||'')!==data.get('email')||(member.phone||'')!==data.get('phone')||(member.notification||'email')!==data.get('notification'))payloads.push({action:'member',id:id||undefined,name:data.get('name'),email:data.get('email'),phone:data.get('phone'),notification:data.get('notification'),active:member?!!member.active:true});
     }
-    setBusy(true);setStatus('');
-    try{for(const payload of payloads)await onSave(payload);onDone?.();}catch(e){setStatus(e instanceof Error?e.message:'Could not save. Please retry.');}finally{setBusy(false);}
+    finishing.current=true;setBusy(true);setStatus('');
+    try{
+      for(const payload of payloads){
+        await onSave(payload);
+        const saved=payload as {action?:string;id?:string};
+        if(saved.action==='member'&&!saved.id)panel.current?.querySelector<HTMLFormElement>('form.member-editor:not([data-member-id])')?.reset();
+      }
+      if(sendInvites&&state.event){
+        const d=await phoneApi('/api/invites/send',{planId:state.event.id});
+        const messages=[`${d.smsQueued} text invitation(s) and ${d.emailQueued} email invitation(s) queued.`];
+        if(d.smsStopped)messages.push(`${d.smsStopped} text(s) skipped because texts are switched off.`);
+        if(d.smsUnavailable)messages.push(`${d.smsUnavailable} text(s) could not be queued: SMS sending needs setup.`);
+        if(d.emailUnavailable)messages.push(`${d.emailUnavailable} email(s) could not be queued: email sending needs setup.`);
+        if(d.missingContacts)messages.push(`${d.missingContacts} invitee(s) have no contact details.`);
+        messages.push('Messages go out in batches every five minutes, subject to daily limits. Existing invitations are not resent.');
+        setStatus(messages.join(' '));
+      }else onDone?.();
+    }catch(e){setStatus(e instanceof Error?e.message:'Could not save. Please retry.');}
+    finally{finishing.current=false;setBusy(false);}
   }
   const [status,setStatus]=useState("");
   const [busy,setBusy]=useState(false);
@@ -288,9 +300,9 @@ function AdminPanel({state,onSave,onDone}:{state:AppState;onSave:(payload:unknow
       <button className="primary" disabled={busy}>{busy?"Saving…":"Save event"}</button>
     </form><p role="status">{status}</p>
     <h3>Members</h3>
-    <p>Add an email, mobile number, or both, then choose Email or SMS responses. SMS uses a verification code; email retains the pilot entry flow. Text invitations require the invitee’s permission. Share the event link through WhatsApp for people who need to opt in.</p>
+    <p>Add an email address, mobile number, or both. Send invites saves your changes and sends to every contact method provided. Invitees enter either invited detail to open the calendar, without a code.</p>
     <div className="member-editors">{state.managedMembers?.map(m=><MemberEditor key={m.id+":"+(m.email||"")+":"+(m.phone||"")+":"+m.notification+":"+m.active} member={m} onSave={onSave}/>)}</div>
-    <h3>Add a member</h3><AddFromContacts onSave={onSave}/><MemberEditor onSave={onSave}/>{state.event&&!state.event.archived&&<SmsInvitations planId={state.event.id} onRefresh={()=>{}}/>}
+    <h3>Add a member</h3><AddFromContacts onSave={onSave}/><MemberEditor onSave={onSave}/>{state.event&&!state.event.archived&&<section><h3>Invitations</h3><p>Send by email, text, or both using the details above. Contacts who have switched off texts will be skipped. Pressing again will not duplicate invitations.</p><button type="button" className="primary" disabled={busy} onClick={()=>void finish(true)}>{busy?'Saving and queuing…':'Send invites'}</button><p role="status">{status}</p></section>}
     {onDone&&<button type="button" className="primary" disabled={busy} onClick={()=>void finish()}>{busy?'Saving…':'Done — open calendar'}<ChevronRight size={18}/></button>}
   </fieldset></section>;
 }
@@ -311,9 +323,8 @@ function MemberEditor({member,onSave}:{member?:Member;onSave:(payload:unknown)=>
     <label>Name<input name="name" defaultValue={member?.name||""} required maxLength={80}/></label>
     <label>Invitee email<input name="email" type="email" defaultValue={member?.email||""} placeholder="name@example.com"/></label>
     <label>Mobile number<input name="phone" type="tel" autoComplete="tel" defaultValue={member?.phone||""} maxLength={40} placeholder="07700 900123"/></label>
-    <label>Response method<select name="notification" defaultValue={member?.notification||'email'}><option value="email">Email</option><option value="sms">SMS (verified mobile)</option></select></label>
-    {member?.notification==='sms'&&<small>{member.smsAllowed?'SMS permission recorded':'Share the link so they can opt in'}{member.smsStatus?' · Invitation: '+member.smsStatus:''}</small>}
-    <span className="member-status">{member?(member.active?((member.notification==='sms'?member.phone:member.email)?"Contact saved":"Contact needed"):"Removed"):"New member"}</span>
+    <input type="hidden" name="notification" value="email"/>
+    <span className="member-status">{member?(member.active?((member.phone||member.email)?"Contact saved":"Contact needed"):"Removed"):"New member"}</span>
     <button type="submit" disabled={busy}>{member?"Save":"Add member"}</button>
     {member&&<button type="button" disabled={busy} onClick={()=>void changeActive()}>{member.active?"Remove from plan":"Restore"}</button>}
     <p role="status">{status}</p>
@@ -398,9 +409,6 @@ function Plans({onOpen,onGuest}:{onOpen:(id:string)=>void;onGuest:()=>void}){
  {error&&<p className="error" role="alert">{error}<button onClick={()=>void load()}>Retry</button></p>}{loading?<p>Loading plans…</p>:<div className="plan-list">{plans.filter(p=>p.archived===archived).map(p=><article className="plan-card" key={p.id}><h2>{p.name}</h2><p>{parseLocal(p.startDate).toLocaleDateString('en-GB')} – {parseLocal(p.endDate).toLocaleDateString('en-GB')}</p><div className="account-actions"><button onClick={()=>onOpen(p.id)}>Open plan</button><button disabled={busy} onClick={()=>void archive(p)}>{p.archived?'Restore':'Archive'}</button></div></article>)}{!plans.some(p=>p.archived===archived)&&<p>{archived?'No archived plans.':'No active plans. Create a plan to get started.'}</p>}</div>}
  </main>;
 }
-
-
-
 
 
 
