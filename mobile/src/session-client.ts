@@ -28,7 +28,7 @@ export function createClient(base: string, store: SessionStore, transport: typeo
   return {
     readSession: store.read,
     clearSession: store.clear,
-    sendCode: (email: string) => send('/api/send-code','POST',{email}),
+    sendCode: (email: string) => send('/api/mobile/send-code','POST',{email}),
     verifyCode: async(email: string, code: string) => save(await send<TokenResponse>('/api/mobile/session','POST',{email,code})),
     async request<T>(path: string, method='GET', payload?: unknown): Promise<T> {
       if (!path.startsWith('/api/') || path.startsWith('/api//')) throw Error('Invalid API path.');

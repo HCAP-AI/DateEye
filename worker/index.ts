@@ -38,6 +38,14 @@ export default {async fetch(request:Request,env:Env):Promise<Response>{
  const path=new URL(request.url).pathname;
  if(!path.startsWith('/api/'))return env.ASSETS.fetch(request);
  try{
+  if(path==='/api/mobile/send-code'&&request.method==='POST'){
+   const b=await body(request);const email=String(b.email||'').trim().toLowerCase();
+   if(email.length>254||!/^\S+@[^\s@]+\.[^\s@]+$/.test(email))throw new AccessError('Please enter a valid email.',400);
+   // This milestone signs in existing accounts; registration stays on the web.
+   const r=await supa(env,'/auth/v1/otp',{method:'POST',body:JSON.stringify({email,create_user:false})});
+   if(!r.ok)throw new AccessError(r.status===429?'Please wait before requesting another code.':'Could not send a code. Register on the website first, or try again.',r.status===429?429:502);
+   return json({ok:true});
+  }
   if(path==='/api/mobile/session'&&request.method==='POST'){
    const b=await body(request);
    if(typeof b.email!=='string'||b.email.length>254||!/^\S+@[^\s@]+\.[^\s@]+$/.test(b.email.trim())||typeof b.code!=='string'||!/^\d{6,10}$/.test(b.code))throw new AccessError('Enter your email and sign-in code.',400);
@@ -192,5 +200,4 @@ export default {async fetch(request:Request,env:Env):Promise<Response>{
   return json(result,request.method==='POST'?201:200);
  }catch(e){return json({error:e instanceof AccessError?e.message:'Service temporarily unavailable. Please retry.'},e instanceof AccessError?e.status:503);}
 }};
-
 
