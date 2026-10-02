@@ -67,7 +67,8 @@ export default {async scheduled(_controller:unknown,env:Env,ctx:{waitUntil:(p:Pr
    if(!r.ok)throw new AccessError('The text code is invalid or expired.',401);
    const d=await r.json() as {access_token:string;expires_in:number;user:{id:string;phone?:string;phone_confirmed_at?:string}};
    if(!d.user.phone_confirmed_at||normalPhone(d.user.phone? '+'+d.user.phone.replace(/^\+/,''):'')!==phone)throw new AccessError('Phone verification failed.',401);
-   if(b.smsAllowed===true)await smsRpc('prod_phone_access',{p_user:d.user.id,p_method:'permissions',p_body:{allowed:true}});
+   // Establish the verified session before optional preference/database work.
+   // Preferences are saved via their authenticated endpoint after this cookie arrives.
    return json({ok:true},200,{'Set-Cookie':phoneCookie(request,d.access_token,Math.min(d.expires_in,3600))});
   }
   if(path==='/api/phone/invitations'&&request.method==='GET'){
@@ -229,6 +230,7 @@ export default {async scheduled(_controller:unknown,env:Env,ctx:{waitUntil:(p:Pr
   return json(result,request.method==='POST'?201:200);
  }catch(e){return json({error:e instanceof AccessError?e.message:'Service temporarily unavailable. Please retry.'},e instanceof AccessError?e.status:503);}
 }};
+
 
 
 
