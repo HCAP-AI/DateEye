@@ -7,7 +7,16 @@ export interface Env {
 const COOKIE='prod_session';
 const ADULT_COOKIE='prod_adult';
 const json=(data:unknown,status=200,headers:Record<string,string>={})=>Response.json(data,{status,headers:{'Cache-Control':'no-store',...headers}});
-function cookie(request:Request){return request.headers.get('cookie')?.split(';').map(x=>x.trim()).find(x=>x.startsWith(COOKIE+'='))?.slice(COOKIE.length+1)||'';}
+function cookie(request:Request){
+ // Native clients use a bearer token. The identity is still verified with Supabase
+ // before every protected operation, exactly as it is for browser sessions.
+ const authorization=request.headers.get('authorization');
+ if(authorization!==null){
+  if(!/^Bearer [A-Za-z0-9._~-]{1,12000}$/.test(authorization))throw new AccessError('Invalid session.',401);
+  return authorization.slice(7);
+ }
+ return request.headers.get('cookie')?.split(';').map(x=>x.trim()).find(x=>x.startsWith(COOKIE+'='))?.slice(COOKIE.length+1)||'';
+}
 function cookieValue(request:Request,value:string,seconds:number){return `${COOKIE}=${value}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${seconds}${new URL(request.url).protocol==='https:'?'; Secure':''}`;}
 async function body(request:Request){
  if(request.headers.get('sec-fetch-site')==='cross-site')throw new AccessError('Cross-site changes are not allowed.');
@@ -29,6 +38,32 @@ export default {async fetch(request:Request,env:Env):Promise<Response>{
  const path=new URL(request.url).pathname;
  if(!path.startsWith('/api/'))return env.ASSETS.fetch(request);
  try{
+  if(path==='/api/mobile/send-code'&&request.method==='POST'){
+   const b=await body(request);const email=String(b.email||'').trim().toLowerCase();
+   if(email.length>254||!/^\S+@[^\s@]+\.[^\s@]+$/.test(email))throw new AccessError('Please enter a valid email.',400);
+   // This milestone signs in existing accounts; registration stays on the web.
+   const r=await supa(env,'/auth/v1/otp',{method:'POST',body:JSON.stringify({email,create_user:false})});
+   if(!r.ok)throw new AccessError(r.status===429?'Please wait before requesting another code.':'Could not send a code. Register on the website first, or try again.',r.status===429?429:502);
+   return json({ok:true});
+  }
+  if(path==='/api/mobile/session'&&request.method==='POST'){
+   const b=await body(request);
+   if(typeof b.email!=='string'||b.email.length>254||!/^\S+@[^\s@]+\.[^\s@]+$/.test(b.email.trim())||typeof b.code!=='string'||!/^\d{6,10}$/.test(b.code))throw new AccessError('Enter your email and sign-in code.',400);
+   const r=await supa(env,'/auth/v1/verify',{method:'POST',body:JSON.stringify({email:b.email.trim().toLowerCase(),token:b.code,type:'email'})});
+   if(!r.ok)throw new AccessError('The code is invalid or expired. Request a new one.',401);
+   const data=await r.json() as {access_token:string;refresh_token:string;expires_in:number;user:{email_confirmed_at?:string}};
+   if(!data.user.email_confirmed_at||!data.access_token||!data.refresh_token)throw new AccessError('Please verify your email.',403);
+   return json({accessToken:data.access_token,refreshToken:data.refresh_token,expiresIn:data.expires_in});
+  }
+  if(path==='/api/mobile/refresh'&&request.method==='POST'){
+   const b=await body(request);
+   if(typeof b.refreshToken!=='string'||!b.refreshToken||b.refreshToken.length>12000)throw new AccessError('Please sign in again.',401);
+   const r=await supa(env,'/auth/v1/token?grant_type=refresh_token',{method:'POST',body:JSON.stringify({refresh_token:b.refreshToken})});
+   if(!r.ok)throw new AccessError('Your session has expired. Please sign in again.',401);
+   const data=await r.json() as {access_token:string;refresh_token:string;expires_in:number;user:{email_confirmed_at?:string}};
+   if(!data.user.email_confirmed_at||!data.access_token||!data.refresh_token)throw new AccessError('Please verify your email.',403);
+   return json({accessToken:data.access_token,refreshToken:data.refresh_token,expiresIn:data.expires_in});
+  }
   if(path==='/api/age-confirm'&&request.method==='POST'){
    const b=await body(request);
    if(b.age!=='adult'||b.termsAccepted!==true)throw new AccessError('prod. is only for people aged 18 or over.',403);
@@ -165,6 +200,4 @@ export default {async fetch(request:Request,env:Env):Promise<Response>{
   return json(result,request.method==='POST'?201:200);
  }catch(e){return json({error:e instanceof AccessError?e.message:'Service temporarily unavailable. Please retry.'},e instanceof AccessError?e.status:503);}
 }};
-
-
 
