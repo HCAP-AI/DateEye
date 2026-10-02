@@ -7,10 +7,14 @@ export function createClient(base: string, store: SessionStore, transport: typeo
   if (url.protocol!=='https:' || url.username || url.password || url.search || url.hash || url.pathname!=='/') throw Error('API address must be an HTTPS origin.');
   let refreshing: Promise<Session> | null = null;
   async function send<T>(path: string, method: string, payload?: unknown, token?: string): Promise<T> {
-    const response=await transport(url.origin+path,{method,headers:{'Content-Type':'application/json',...(token?{Authorization:'Bearer '+token}:{})},...(payload===undefined?{}:{body:JSON.stringify(payload)}),signal:AbortSignal.timeout(20000)});
-    const data=await response.json();
-    if (!response.ok) throw new ApiError(data.error || 'Please try again.',response.status);
-    return data as T;
+    const controller=new AbortController();
+    const timeout=setTimeout(()=>controller.abort(),20000);
+    try {
+      const response=await transport(url.origin+path,{method,headers:{'Content-Type':'application/json',...(token?{Authorization:'Bearer '+token}:{})},...(payload===undefined?{}:{body:JSON.stringify(payload)}),signal:controller.signal});
+      const data=await response.json();
+      if (!response.ok) throw new ApiError(data.error || 'Please try again.',response.status);
+      return data as T;
+    } finally { clearTimeout(timeout); }
   }
   async function save(data: TokenResponse) {
     if (!data.accessToken || !data.refreshToken || !Number.isFinite(data.expiresIn) || data.expiresIn<=0) throw Error('Invalid sign-in response.');

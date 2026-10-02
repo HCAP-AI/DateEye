@@ -27,7 +27,7 @@ function Main() {
   async function enter() {const data=await api.request<Profile>('/api/profile');setProfile(data);setSignedIn(true);if(data.profile&&data.termsVersion===TERMS_VERSION)await loadPlans();}
   useEffect(()=>{let alive=true;void api.readSession().then(async session=>{if(session&&alive)await run(enter);}).catch(()=>{if(alive)setError('Could not restore your session. Please sign in.');}).finally(()=>{if(alive)setBooting(false);});return()=>{alive=false;};},[]);
   useEffect(()=>{const sub=BackHandler.addEventListener('hardwareBackPress',()=>{if(screen!=='plans'){setScreen('plans');return true;}return false;});return()=>sub.remove();},[screen]);
-  function startDemo(){setDemo(true);setSelected(structuredClone(demoPlan));setPlans([demoPlan.event]);setScreen('plans');setError('');}
+  function startDemo(){setDemo(true);setSelected(JSON.parse(JSON.stringify(demoPlan)) as PlanState);setPlans([demoPlan.event]);setScreen('plans');setError('');}
   async function openPlan(id:string){setStartInSettings(false);if(demo){setScreen('plan');return;}await run(async()=>{const state=await api.request<PlanState>('/api/state?plan='+encodeURIComponent(id));setSelected(state);setScreen('plan');});}
   async function savePlan(payload:unknown,method='PATCH'){if(!selected)return;const id=selected.event.id;if(demo)return;await api.request('/api/state?plan='+encodeURIComponent(id),method,payload);setSelected(await api.request<PlanState>('/api/state?plan='+encodeURIComponent(id)));}
   async function signOut(){await run(async()=>{if(!demo)await api.request('/api/logout','POST',{});await api.clearSession();setDemo(false);setSignedIn(false);setProfile(null);setSelected(null);setPlans([]);setScreen('plans');});}
