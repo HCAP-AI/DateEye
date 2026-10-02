@@ -1,6 +1,7 @@
 
+import {normalPhone,phoneRate,processSms,smsWebhook,uuid, type SmsEnv} from './sms.ts';
 import {AccessError, validateEvent, validateMember, validDate} from './permissions.ts';
-export interface Env {
+export interface Env extends SmsEnv {
  SUPABASE_URL:string; SUPABASE_PUBLISHABLE_KEY:string; SUPABASE_SECRET_KEY:string; ADMIN_EMAIL:string;
  ASSETS:{fetch:(r:Request)=>Promise<Response>};
 }
@@ -25,10 +26,67 @@ async function supa(env:Env,path:string,init:RequestInit={},privileged=false){
  if(missing.length)throw new AccessError('Cloudflare runtime setting missing: '+missing.join(', ')+'. Add it under this Worker\'s Settings > Variables and Secrets, then deploy the saved version.',503);
  return fetch(env.SUPABASE_URL+path,{...init,headers:{apikey:privileged?env.SUPABASE_SECRET_KEY:env.SUPABASE_PUBLISHABLE_KEY,'Content-Type':'application/json',...init.headers},signal:AbortSignal.timeout(15000)});
 }
-export default {async fetch(request:Request,env:Env):Promise<Response>{
+async function rpc(env:Env,name:string,data:Record<string,unknown>){
+ const r=await supa(env,'/rest/v1/rpc/'+name,{method:'POST',body:JSON.stringify(data)},true);
+ const d=await r.json() as {code?:string;message?:string};
+ if(!r.ok)throw new AccessError(d.code==='42501'?'This invitation or action is not available.':d.code==='P0001'?d.message||'Request refused.':'SMS database request failed. Check migration 06.',d.code==='42501'?403:d.code==='P0001'?400:502);
+ return d;
+}
+function phoneCookie(request:Request,value:string,seconds:number){return `prod_phone_session=${value}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${seconds}${new URL(request.url).protocol==='https:'?'; Secure':''}`;}
+async function phoneUser(request:Request,env:Env){
+ const token=request.headers.get('cookie')?.split(';').map(x=>x.trim()).find(x=>x.startsWith('prod_phone_session='))?.slice(19);
+ if(!token)throw new AccessError('Please verify your mobile number.',401);
+ const r=await supa(env,'/auth/v1/user',{headers:{Authorization:'Bearer '+token}});
+ if(!r.ok)throw new AccessError('Please verify your mobile number again.',401);
+ const u=await r.json() as {id:string;phone?:string;phone_confirmed_at?:string};if(!u.phone_confirmed_at||!u.phone)throw new AccessError('Please verify your mobile number.',401);
+ return u;
+}
+export default {async scheduled(_controller:unknown,env:Env,ctx:{waitUntil:(p:Promise<unknown>)=>void}){ctx.waitUntil(processSms(env,(n,d)=>rpc(env,n,d)));},async fetch(request:Request,env:Env):Promise<Response>{
  const path=new URL(request.url).pathname;
  if(!path.startsWith('/api/'))return env.ASSETS.fetch(request);
  try{
+  const smsRpc=(n:string,d:Record<string,unknown>)=>rpc(env,n,d);
+  if(path==='/api/sms/inbound'||path==='/api/sms/status')return await smsWebhook(request,env,smsRpc);
+  if(path==='/api/phone/send-code'&&request.method==='POST'){
+   const b=await body(request);const phone=normalPhone(b.phone);
+   if(!request.headers.get('cookie')?.split(';').some(x=>x.trim()===ADULT_COOKIE+'=1'))throw new AccessError('Please confirm you are 18 or over.',403);
+   await phoneRate(smsRpc,phone,request.headers.get('cf-connecting-ip')||'local');
+   // Require an existing active invitation; generic response avoids disclosing membership.
+   const lookup=await supa(env,'/rest/v1/dateeye_members?select=id,dateeye_events!inner(archived)&active=eq.true&dateeye_events.archived=eq.false&phone=eq.'+encodeURIComponent(phone)+(uuid(b.planId)?'&event_id=eq.'+b.planId:''),{},true);
+   if(!lookup.ok)throw new AccessError('SMS lookup failed. Check migration 06.',502);
+   const matches=await lookup.json() as unknown[];
+   if(matches.length){const r=await supa(env,'/auth/v1/otp',{method:'POST',body:JSON.stringify({phone,create_user:true,channel:'sms'})});if(!r.ok)throw new AccessError(r.status===429?'Please wait before requesting another code.':'Could not send a text code. Check Supabase Phone provider settings.',r.status===429?429:502);}
+   return json({ok:true});
+  }
+  if(path==='/api/phone/verify-code'&&request.method==='POST'){
+   const b=await body(request);const phone=normalPhone(b.phone);
+   if(!request.headers.get('cookie')?.split(';').some(x=>x.trim()===ADULT_COOKIE+'=1'))throw new AccessError('Please confirm you are 18 or over.',403);
+   if(typeof b.code!=='string'||!/^\d{6,10}$/.test(b.code))throw new AccessError('Enter the code from your text.',400);
+   await phoneRate(smsRpc,phone,request.headers.get('cf-connecting-ip')||'local',true);
+   const r=await supa(env,'/auth/v1/verify',{method:'POST',body:JSON.stringify({phone,token:b.code,type:'sms'})});
+   if(!r.ok)throw new AccessError('The text code is invalid or expired.',401);
+   const d=await r.json() as {access_token:string;expires_in:number;user:{id:string;phone?:string;phone_confirmed_at?:string}};
+   if(!d.user.phone_confirmed_at||normalPhone(d.user.phone? '+'+d.user.phone.replace(/^\+/,''):'')!==phone)throw new AccessError('Phone verification failed.',401);
+   if(b.smsAllowed===true)await smsRpc('prod_phone_access',{p_user:d.user.id,p_method:'permissions',p_body:{allowed:true}});
+   return json({ok:true},200,{'Set-Cookie':phoneCookie(request,d.access_token,Math.min(d.expires_in,3600))});
+  }
+  if(path==='/api/phone/invitations'&&request.method==='GET'){
+   const u=await phoneUser(request,env);return json(await smsRpc('prod_phone_access',{p_user:u.id,p_method:'plans',p_body:{}}));
+  }
+  if(path==='/api/phone/preferences'&&request.method==='POST'){
+   const b=await body(request);const u=await phoneUser(request,env);return json(await smsRpc('prod_phone_access',{p_user:u.id,p_method:'permissions',p_body:b}));
+  }
+  if(path==='/api/phone/logout'&&request.method==='POST'){
+   await body(request);return json({ok:true},200,{'Set-Cookie':phoneCookie(request,'',0)});
+  }
+  if(path==='/api/sms/invite'&&request.method==='POST'){
+   const b=await body(request);if(!uuid(b.planId))throw new AccessError('Choose an event.',400);
+   if(env.SMS_ENABLED!=='true')throw new AccessError('SMS sending is not enabled yet.',503);
+   const token=cookie(request);if(!token)throw new AccessError('Please sign in as organiser.',401);
+   const r=await supa(env,'/auth/v1/user',{headers:{Authorization:'Bearer '+token}});if(!r.ok)throw new AccessError('Please sign in again.',401);
+   const u=await r.json() as {id:string;email_confirmed_at?:string};if(!u.email_confirmed_at)throw new AccessError('Organiser access required.',403);
+   return json(await smsRpc('prod_sms_queue',{p_user:u.id,p_plan:b.planId}));
+  }
   if(path==='/api/age-confirm'&&request.method==='POST'){
    const b=await body(request);
    if(b.age!=='adult'||b.termsAccepted!==true)throw new AccessError('prod. is only for people aged 18 or over.',403);
@@ -138,6 +196,12 @@ export default {async fetch(request:Request,env:Env):Promise<Response>{
   b.planId=url.searchParams.get('plan')||null;
   b.view=url.searchParams.get('view')||null;
   if(b.planId && b.planId!=='new' && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(b.planId)))throw new AccessError('Invalid plan link.',400);
+  if(request.headers.get('x-prod-phone-session')==='1'){
+   if(!['GET','PUT'].includes(request.method)||!uuid(b.planId))throw new AccessError('Phone access is for responding to an invitation.',403);
+   if(request.method==='PUT'&&(!validDate(b.date)||typeof b.available!=='boolean'))throw new AccessError('Invalid availability.',400);
+   const u=await phoneUser(request,env);return json(await smsRpc('prod_phone_access',{p_user:u.id,p_method:request.method,p_body:b}));
+  }
+  if(request.method==='PATCH'&&b.action==='member'&&b.phone!==undefined)b.phone=b.phone?normalPhone(b.phone):null;
   const entry=request.headers.get('x-dateeye-email');let email:string|null=null,user:string|null=null;
   if(entry!==null){
    if(!request.headers.get('cookie')?.split(';').some(x=>x.trim()===ADULT_COOKIE+'=1'))throw new AccessError('Please confirm you are 18 or over.',403);
