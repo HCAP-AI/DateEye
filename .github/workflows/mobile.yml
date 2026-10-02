@@ -1,0 +1,29 @@
+name: Mobile foundation checks
+on:
+  pull_request:
+    paths: ['mobile/**', 'worker/**', 'tests/**', '.github/workflows/mobile.yml']
+  push:
+    branches: ['mobile/app-foundation']
+permissions:
+  contents: read
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Install website dependencies
+        run: npm ci
+      - name: Website regression tests and build
+        run: npm test && npm run build
+      - name: Install mobile dependencies
+        working-directory: mobile
+        run: npm install
+      - name: Mobile typecheck and logic tests
+        working-directory: mobile
+        run: npm run typecheck && npm test
+      - name: Bundle native apps
+        working-directory: mobile
+        run: npx expo export --platform ios --output-dir dist-ios && npx expo export --platform android --output-dir dist-android
