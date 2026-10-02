@@ -55,3 +55,7 @@ a{color:var(--green)} button:focus-visible,a:focus-visible{outline:3px solid var
 .setup-card .terms-check-copy a{display:inline;color:#256c67;font-weight:600;text-decoration:underline;text-underline-offset:3px}
 .setup-card .terms-check-copy a:hover{color:#ad493e}
 .setup-card label.terms-check:focus-within{outline:2px solid #e77767;outline-offset:3px}
+
+.member-editor{grid-template-columns:repeat(4,minmax(0,1fr));align-items:end}.member-editor .member-status,.member-editor small{grid-column:1/-1}.member-editor button{justify-self:start}.member-editor select{width:100%;min-width:0}
+@media(max-width:850px){.member-editor{grid-template-columns:1fr 1fr}}
+@media(max-width:480px){.member-editor{grid-template-columns:1fr}}
