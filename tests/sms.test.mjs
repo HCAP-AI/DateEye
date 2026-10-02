@@ -95,9 +95,9 @@ test('rate-limit refusal stops phone code requests before an OTP is sent',async(
  const old=globalThis.fetch;let urls=[];globalThis.fetch=async(url)=>{urls.push(String(url));return Response.json(false);};
  try{const r=await worker.fetch(new Request('https://prod.test/api/phone/send-code',{method:'POST',headers:{'Content-Type':'application/json',cookie:'prod_adult=1'},body:JSON.stringify({phone})}),env);assert.equal(r.status,429);assert.equal(urls.length,1);assert.ok(urls[0].includes('prod_sms_rate'));}finally{globalThis.fetch=old;}
 });
-test('phone code verification uses Supabase identity and returns only HttpOnly session',async()=>{
+test('phone verification commits its session before optional preference work',async()=>{
  const env={SUPABASE_URL:'https://example.supabase.co',SUPABASE_PUBLISHABLE_KEY:'test',SUPABASE_SECRET_KEY:'test',ASSETS:{fetch:async()=>new Response('asset')}};
  const old=globalThis.fetch;let permission;
  globalThis.fetch=async(url,init)=>{if(String(url).includes('prod_sms_rate'))return Response.json(true);if(String(url).endsWith('/verify')){assert.equal(JSON.parse(init.body).type,'sms');return Response.json({access_token:'phone-token',expires_in:3600,user:{id:guest,phone:phone.slice(1),phone_confirmed_at:'2026-10-02'}});}permission=JSON.parse(init.body);return Response.json({ok:true});};
- try{const r=await worker.fetch(new Request('https://prod.test/api/phone/verify-code',{method:'POST',headers:{'Content-Type':'application/json',cookie:'prod_adult=1'},body:JSON.stringify({phone,code:'123456',smsAllowed:true,userId:owner})}),env);assert.equal(r.status,200);assert.match(r.headers.get('set-cookie'),/prod_phone_session=phone-token.*HttpOnly.*SameSite=Strict.*Secure/);assert.deepEqual(await r.json(),{ok:true});assert.equal(permission.p_user,guest);}finally{globalThis.fetch=old;}
+ try{const r=await worker.fetch(new Request('https://prod.test/api/phone/verify-code',{method:'POST',headers:{'Content-Type':'application/json',cookie:'prod_adult=1'},body:JSON.stringify({phone,code:'123456',smsAllowed:true,userId:owner})}),env);assert.equal(r.status,200);assert.match(r.headers.get('set-cookie'),/prod_phone_session=phone-token.*HttpOnly.*SameSite=Strict.*Secure/);assert.deepEqual(await r.json(),{ok:true});assert.equal(permission,undefined);}finally{globalThis.fetch=old;}
 });
