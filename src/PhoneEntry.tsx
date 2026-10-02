@@ -1,16 +1,26 @@
-import {useEffect,useState} from 'react';
+import {useEffect,useRef,useState} from 'react';
 export async function phoneApi(path:string,data?:unknown){const r=await fetch(path,data===undefined?{cache:'no-store'}:{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});const d=await r.json();if(!r.ok)throw Error(d.error||'Please try again.');return d;}
-export function PhoneEntry({planId,onDone}:{planId:string|null;onDone:()=>void}){
+export function PhoneEntry({planId,onDone}:{planId:string|null;onDone:(notice?:string)=>void}){
+ const submitting=useRef(false);
+ const verified=useRef(false);
+ const interacting=useRef(false);
  const [phone,setPhone]=useState(''),[stage,setStage]=useState('phone'),[busy,setBusy]=useState(false),[error,setError]=useState(''),[allowed,setAllowed]=useState(false);
- useEffect(()=>{void phoneApi('/api/phone/invitations').then(onDone).catch(()=>{});},[]);
- async function submit(form:FormData){setBusy(true);setError('');try{
+ useEffect(()=>{let mounted=true;void phoneApi('/api/phone/invitations').then(()=>{if(mounted&&!interacting.current){verified.current=true;setStage('verified');onDone();}}).catch(()=>{});return()=>{mounted=false;};},[]);
+ async function submit(form:FormData){if(submitting.current)return;if(verified.current){onDone();return;}submitting.current=true;interacting.current=true;setBusy(true);setError('');try{
   if(stage==='phone'){
    await phoneApi('/api/age-confirm',{age:form.get('age'),termsAccepted:form.get('termsAccepted')==='on'});
    const number=String(form.get('phone')||'');setPhone(number);setAllowed(form.get('smsAllowed')==='on');
    await phoneApi('/api/phone/send-code',{phone:number,planId});setStage('code');
-  }else{await phoneApi('/api/phone/verify-code',{phone,code:String(form.get('code')||'').trim(),smsAllowed:allowed});onDone();}
- }catch(e){setError(e instanceof Error?e.message:'Please try again.');}finally{setBusy(false);}}
- return <><p>{stage==='phone'?'Enter your invited mobile number. We’ll text a code to verify it.':`If ${phone} has an active invitation, a code has been sent. Enter it below.`}</p><form onSubmit={e=>{e.preventDefault();void submit(new FormData(e.currentTarget));}}>
+  }else{
+   await phoneApi('/api/phone/verify-code',{phone,code:String(form.get('code')||'').trim()});
+   verified.current=true;setStage('verified');
+   let notice='';
+   if(allowed){try{await phoneApi('/api/phone/preferences',{allowed:true});}catch{notice='Your mobile is verified, but we could not save your text preference. Use Enable event texts below to retry.';}}
+   onDone(notice);
+  }
+ }catch(e){setError(e instanceof Error?e.message:'Please try again.');}finally{submitting.current=false;setBusy(false);}}
+ if(stage==='verified')return <><p role="status">Mobile number verified. Opening your calendar…</p>{error&&<p role="alert">{error}</p>}<button className="primary" disabled={busy} onClick={()=>onDone()}>Continue to calendar</button></>;
+ return <><p>{stage==='phone'?'Enter your invited mobile number. We’ll text a code to verify it.':`If ${phone} has an active invitation, a code has been sent. Enter it below.`}</p><form onChange={()=>{interacting.current=true;}} onSubmit={e=>{e.preventDefault();void submit(new FormData(e.currentTarget));}}>
  {stage==='phone'?<><label>Your mobile number<input type="tel" name="phone" autoComplete="tel" required maxLength={40} placeholder="07700 900123" defaultValue={phone}/></label>
  <label>Age<select name="age" required defaultValue=""><option value="" disabled>Select</option><option value="under18">Under 18</option><option value="adult">18 or over</option></select></label>
  <label className="terms-check"><input name="termsAccepted" type="checkbox" required/><span className="terms-check-copy">I agree to the <a href="/terms#terms" target="_blank" rel="noopener noreferrer">Terms of Service</a> and acknowledge the <a href="/terms#privacy" target="_blank" rel="noopener noreferrer">Privacy Policy</a>.</span></label>
