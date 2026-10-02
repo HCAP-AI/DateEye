@@ -37,6 +37,8 @@ function Home({planId,onPlans,guest=false}:{planId:string|null;onPlans:()=>void;
   const [setupFlow,setSetupFlow]=useState(new URLSearchParams(window.location.search).get("setup")==="1");
   const [saveStatus,setSaveStatus] = useState("");
   const [phoneVerified,setPhoneVerified]=useState(false);
+  const [phoneRefresh,setPhoneRefresh]=useState(0);
+  const [phoneNotice,setPhoneNotice]=useState('');
   const [entryMode,setEntryMode]=useState(new URLSearchParams(window.location.search).get('via')==='sms'?'sms':'email');
   const [participantEmail,setParticipantEmail] = useState("");
   const [needsEmail,setNeedsEmail] = useState(false);
@@ -50,14 +52,14 @@ function Home({planId,onPlans,guest=false}:{planId:string|null;onPlans:()=>void;
     try {
       if(guest&&!resolvedPlan&&(participantEmail||phoneVerified)){
         const r=await window.fetch(phoneVerified?'/api/phone/invitations':'/api/invitations',phoneVerified?{cache:'no-store'}:{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:participantEmail})});
-        const d=await r.json();if(!r.ok)throw Error(d.error||'Could not find invitations.');
+        const d=await r.json();if(!r.ok){if(phoneVerified&&r.status===401)setPhoneVerified(false);throw Error(d.error||'Could not find invitations.');}
         if(d.plans.length===1){setResolvedPlan(d.plans[0].id);return;}
         setInvitations(d.plans);setNeedsEmail(true);setError(d.plans.length?'':'No active invitations found for these details.');return;
       }
       const res = await fetch("/api/state", { cache: "no-store", headers:participantHeaders });
       const data = await res.json() as AppState & {error?:string};
       if(res.status===401||res.status===403) {
-        setState(null); setNeedsEmail(true);setPhoneVerified(false);
+        setState(null); setNeedsEmail(true);if(res.status===401)setPhoneVerified(false);
         setError((participantEmail||phoneVerified) ? data.error || "Please check your email." : "");
         return;
       }
@@ -67,9 +69,9 @@ function Home({planId,onPlans,guest=false}:{planId:string|null;onPlans:()=>void;
       if (data.event) setMonth(parseLocal(data.event.startDate));
       setSelectedMember(data.viewer.memberId || "");
       setError("");
-    } catch (e) { setError(e instanceof Error ? e.message : "Could not load the calendar."); }
+    } catch (e) { if(phoneVerified){setState(null);setNeedsEmail(true);}setError(e instanceof Error ? e.message : "Could not load the calendar."); }
     finally {setOpening(false);}
-  }, [participantEmail,guest,resolvedPlan,phoneVerified]);
+  }, [participantEmail,guest,resolvedPlan,phoneVerified,phoneRefresh]);
 
   useEffect(() => { void load(); }, [load]);
 
@@ -162,7 +164,7 @@ function Home({planId,onPlans,guest=false}:{planId:string|null;onPlans:()=>void;
   if (needsEmail) return <main className="setup-shell"><section className="setup-card">
     <BrandLogo/><h1>When are you free?</h1>
     <div className="account-actions"><button aria-pressed={entryMode==='email'} onClick={()=>{setParticipantEmail('');setPhoneVerified(false);setEntryMode('email');}}>Email</button><button aria-pressed={entryMode==='sms'} onClick={()=>{setParticipantEmail('');setEntryMode('sms');}}>Mobile number</button></div>
-    {entryMode==='sms'?<>{error&&<p className="error" role="alert">{error}</p>}<PhoneEntry planId={resolvedPlan} onDone={()=>{setParticipantEmail('');setError('');setPhoneVerified(true);}}/></>:<>
+    {entryMode==='sms'?<>{error&&<p className="error" role="alert">{error}</p>}{phoneNotice&&<p role="status">{phoneNotice}</p>}{phoneVerified?<><p>{opening?'Mobile number verified. Opening your calendar…':'Your mobile number is verified.'}</p>{!opening&&<><button className="primary" onClick={()=>setPhoneRefresh(v=>v+1)}>Retry opening calendar</button>{resolvedPlan&&<button className="admin-link" onClick={()=>{setResolvedPlan(null);setPhoneRefresh(v=>v+1);}}>Choose another event</button>}</>}<PhonePreferences/></>:<PhoneEntry planId={resolvedPlan} onDone={(notice='')=>{setParticipantEmail('');setError('');setPhoneNotice(notice);setPhoneVerified(true);setPhoneRefresh(v=>v+1);}}/>}</>:<>
     <p className="intro">Please enter your email address to get to the calendar and share your availability.</p>
     <form onSubmit={e=>{e.preventDefault();void (async()=>{setError("");const form=new FormData(e.currentTarget);if(form.get('age')!=='adult'){setError('prod. is only for people aged 18 or over.');return;}try{const r=await window.fetch('/api/age-confirm',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({age:'adult',termsAccepted:form.get('termsAccepted')==='on'})});const d=await r.json();if(!r.ok)throw Error(d.error||'Please confirm you are 18 or over.');const email=String(form.get('email')||'').trim().toLowerCase();if(email===participantEmail)void load();else setParticipantEmail(email);}catch(err){setError(err instanceof Error?err.message:'Please try again.');}})();}}>
       <label>Your email<input name="email" type="email" autoComplete="email" inputMode="email" autoCapitalize="none" spellCheck={false} defaultValue={participantEmail} required maxLength={254} placeholder="you@example.com"/></label>
@@ -245,7 +247,7 @@ function Home({planId,onPlans,guest=false}:{planId:string|null;onPlans:()=>void;
           <div className="response-progress"><div><span>Responses</span><strong>{new Set(state.availability.map(a=>a.memberId)).size}/{total}</strong></div><div className="progress"><i style={{width:`${new Set(state.availability.map(a=>a.memberId)).size/total*100}%`}}/></div><p role="status">{saveStatus || (activeName ? activeName+", your changes save automatically." : "Only your own responses can be edited.")}</p></div>
         </aside>
       </div>
-      {phoneVerified&&<PhonePreferences/>}
+      {phoneVerified&&<>{phoneNotice&&<p role="status">{phoneNotice}</p>}<PhonePreferences/></>}
     </main>
   );
 }
@@ -396,6 +398,7 @@ function Plans({onOpen,onGuest}:{onOpen:(id:string)=>void;onGuest:()=>void}){
  {error&&<p className="error" role="alert">{error}<button onClick={()=>void load()}>Retry</button></p>}{loading?<p>Loading plans…</p>:<div className="plan-list">{plans.filter(p=>p.archived===archived).map(p=><article className="plan-card" key={p.id}><h2>{p.name}</h2><p>{parseLocal(p.startDate).toLocaleDateString('en-GB')} – {parseLocal(p.endDate).toLocaleDateString('en-GB')}</p><div className="account-actions"><button onClick={()=>onOpen(p.id)}>Open plan</button><button disabled={busy} onClick={()=>void archive(p)}>{p.archived?'Restore':'Archive'}</button></div></article>)}{!plans.some(p=>p.archived===archived)&&<p>{archived?'No archived plans.':'No active plans. Create a plan to get started.'}</p>}</div>}
  </main>;
 }
+
 
 
 
