@@ -67,7 +67,7 @@ test('email sending uses individual recipients and treats acceptance and uncerta
  const old=globalThis.fetch;let sends=0,claims=0;const results=[];
  const rpc=async(n,d)=>n==='prod_email_claim'?(claims++===0?{id:owner,email:'guest@example.com',planId:outsider,eventName:'Weekend',organiser:'Oliver'}:null):results.push(d);
  try{
- globalThis.fetch=async(url,init)=>{sends++;assert.equal(url,'https://api.sendgrid.com/v3/mail/send');const b=JSON.parse(init.body);assert.equal(b.personalizations[0].to.length,1);assert.match(b.content[0].value,/No verification code/);return new Response(null,{status:202});};
+ globalThis.fetch=async(url,init)=>{sends++;assert.equal(url,'https://api.sendgrid.com/v3/mail/send');const b=JSON.parse(init.body);assert.equal(b.personalizations[0].to.length,1);assert.ok(b.content.every(c=>!c.value.includes('No verification code')));return new Response(null,{status:202});};
  await processEmail({...env,EMAIL_ENABLED:'false'},rpc);assert.equal(claims,0);
  await processEmail(env,rpc);assert.equal(sends,1);assert.equal(results[0].p_status,'accepted');
  claims=0;globalThis.fetch=async()=>{sends++;throw Error('timeout');};await processEmail(env,rpc);assert.equal(sends,2);assert.equal(results[1].p_status,'unknown');
