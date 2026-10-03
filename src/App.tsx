@@ -70,6 +70,25 @@ function Home({planId,onPlans,guest=false}:{planId:string|null;onPlans:()=>void;
 
   useEffect(() => { void load(); }, [load]);
 
+  // Refresh group responses without resetting the month or overwriting a pending save.
+  useEffect(() => {
+    if (!state?.event || needsEmail || saving || adminOpen || setupFlow) return;
+    let cancelled=false, pending=false;
+    const controller=new AbortController();
+    const refresh=async()=>{
+      if(document.hidden||pending)return;
+      pending=true;
+      try{
+        const r=await window.fetch('/api/state?plan='+encodeURIComponent(state.event!.id),{cache:'no-store',headers:participantEmail?{'x-prod-contact':participantEmail}:{},signal:controller.signal});
+        if(r.ok){const next=await r.json() as AppState;if(!cancelled)setState(next);}
+      }catch{/* Keep the last successful view during a connection interruption. */}
+      finally{pending=false;}
+    };
+    const timer=window.setInterval(()=>void refresh(),10000);
+    window.addEventListener('focus',refresh);
+    return()=>{cancelled=true;controller.abort();window.clearInterval(timer);window.removeEventListener('focus',refresh);};
+  },[state?.event?.id,needsEmail,saving,adminOpen,setupFlow,participantEmail]);
+
   const counts = useMemo(() => {
     const result = new Map<string, { available: number; replied: number; names: string[] }>();
     if (!state) return result;
@@ -87,9 +106,9 @@ function Home({planId,onPlans,guest=false}:{planId:string|null;onPlans:()=>void;
     const out: { date: string; available: number; replied: number; names: string[] }[] = [];
     for (let d = parseLocal(state.event.startDate), end = parseLocal(state.event.endDate); d <= end; d = new Date(d.getFullYear(), d.getMonth(), d.getDate()+1)) {
       const date = iso(d); const row = counts.get(date) || { available: 0, replied: 0, names: [] };
-      if (row.available > state.members.length / 2) out.push({ date, ...row });
+      if (row.available > 0) out.push({ date, ...row });
     }
-    return out.sort((a,b) => b.available - a.available || a.date.localeCompare(b.date));
+    return out.sort((a,b) => b.available - a.available || a.date.localeCompare(b.date)).slice(0,3);
   }, [counts, state]);
 
   async function createPlan(form: FormData) {
@@ -165,7 +184,7 @@ function Home({planId,onPlans,guest=false}:{planId:string|null;onPlans:()=>void;
       {error&&<p className="error" role="alert">{error}</p>}
       <button className="primary" disabled={opening}>{opening?"Opening…":"Open calendar"}<ChevronRight size={18}/></button>
     </form>
-    {invitations.length>0&&<div className="plan-list"><h2>Choose your event</h2>{invitations.map(p=><button key={p.id} onClick={()=>{setInvitations([]);setResolvedPlan(p.id);}}>{p.name}</button>)}</div>}
+    {invitations.length>0&&<div className="event-chooser"><h2>Choose your event</h2><p>Select an invitation to share your availability.</p>{invitations.map(p=><button key={p.id} onClick={()=>{setInvitations([]);setResolvedPlan(p.id);}}><CalendarDays size={22}/><span>{p.name}</span><ChevronRight size={19}/></button>)}</div>}
     <p className="pilot-note">Only invited contact details can open an event. Group members can see names and availability.</p>
     <a className="admin-link" href="/signin">Organiser sign-in</a>
   </section></main>;
@@ -199,6 +218,7 @@ function Home({planId,onPlans,guest=false}:{planId:string|null;onPlans:()=>void;
   const activeName = state.members.find(m => m.id === selectedMember)?.name;
   const cells = monthDays(month);
   const total = state.members.length;
+  const submitted = new Set(state.availability.filter(a=>a.date>=event.startDate&&a.date<=event.endDate).map(a=>a.memberId));
   return (
     <main className="app-shell">
       <header className="topbar">
@@ -232,10 +252,12 @@ function Home({planId,onPlans,guest=false}:{planId:string|null;onPlans:()=>void;
             <div className="legend"><span><i className="swatch mine"/>You’re free</span><span><i className="swatch unavailable"/>Unavailable</span><span><i className="swatch all"/>Everyone’s free</span><span><i className="swatch empty"/>No response</span></div>
           </div>
         </section>
-        <aside className={view==="results"?"results-panel":"results-panel mobile-hidden"}>
-          <div className="results-title"><div><p className="eyebrow">BEST DATES</p><h2>When should we go?</h2></div><Sparkles size={20}/></div>
-          {ranked.length ? <div className="result-list">{ranked.map((r,i)=>{const all=r.available===total;return <article key={r.date} className={all?"winner":""}><div className="date-tile"><strong>{parseLocal(r.date).toLocaleDateString("en-GB",{day:"2-digit"})}</strong><span>{parseLocal(r.date).toLocaleDateString("en-GB",{month:"short"})}</span></div><div className="result-copy"><div>{all&&<Crown size={14}/>}<strong>{all?"Everyone is free":`${r.available} of ${total} are free`}</strong></div><p>{parseLocal(r.date).toLocaleDateString("en-GB",{weekday:"long"})} · {r.names.join(", ")}</p></div>{i===0&&<span className="top-choice">TOP</span>}</article>})}</div>:<div className="empty-state"><Users size={28}/><h3>No matches yet</h3><p>Once more than half the group is free, the best dates will appear here.</p></div>}
-          <div className="response-progress"><div><span>Responses</span><strong>{new Set(state.availability.map(a=>a.memberId)).size}/{total}</strong></div><div className="progress"><i style={{width:`${new Set(state.availability.map(a=>a.memberId)).size/total*100}%`}}/></div><p role="status">{saveStatus || (activeName ? activeName+", your changes save automatically." : "Only your own responses can be edited.")}</p></div>
+        <aside className="results-panel">
+          <div className="results-title"><div><p className="eyebrow">TOP THREE DATES</p><h2>When should we go?</h2></div><Sparkles size={20}/></div>
+          {ranked.length ? <div className="result-list">{ranked.map((r,i)=>{const all=r.available===total;return <article key={r.date} className={all?"winner":""}><div className="date-tile"><strong>{parseLocal(r.date).toLocaleDateString("en-GB",{day:"2-digit"})}</strong><span>{parseLocal(r.date).toLocaleDateString("en-GB",{month:"short"})}</span></div><div className="result-copy"><div>{all&&<Crown size={14}/>}<strong>{all?"Everyone is free":`${r.available} of ${total} are free`}</strong></div><p>{parseLocal(r.date).toLocaleDateString("en-GB",{weekday:"long"})} · {parseLocal(r.date).getFullYear()}</p></div>{i===0&&<span className="top-choice">TOP</span>}</article>})}</div>:<div className="empty-state"><Users size={28}/><h3>No matches yet</h3><p>Dates appear as soon as someone marks themselves free.</p></div>}
+          <p className="live-note">Updates every 10 seconds. Tied dates are shown earliest first.</p>
+          <div className="response-progress"><div><span>Responses</span><strong>{submitted.size}/{total}</strong></div><div className="progress"><i style={{width:`${(total?submitted.size/total*100:0)}%`}}/></div><p role="status">{saveStatus || (activeName ? activeName+", your changes save automatically." : "Only your own responses can be edited.")}</p></div>
+          <section className="submission-list" aria-label="Availability submissions"><h3>Who has shared availability?</h3><p>A response is recorded when someone saves a date.</p><ul>{state.members.map(m=><li key={m.id}><span>{m.name}</span><span className={submitted.has(m.id)?'submitted':'awaiting'}>{submitted.has(m.id)?<><Check size={14}/>Submitted</>:'Awaiting response'}</span></li>)}</ul></section>
         </aside>
       </div>
 
@@ -402,6 +424,7 @@ function Plans({onOpen,onGuest}:{onOpen:(id:string)=>void;onGuest:()=>void}){
  {error&&<p className="error" role="alert">{error}<button onClick={()=>void load()}>Retry</button></p>}{loading?<p>Loading plans…</p>:<div className="plan-list">{plans.filter(p=>p.archived===archived).map(p=><article className="plan-card" key={p.id}><h2>{p.name}</h2><p>{parseLocal(p.startDate).toLocaleDateString('en-GB')} – {parseLocal(p.endDate).toLocaleDateString('en-GB')}</p><div className="account-actions"><button onClick={()=>onOpen(p.id)}>Open plan</button><button disabled={busy} onClick={()=>void archive(p)}>{p.archived?'Restore':'Archive'}</button></div></article>)}{!plans.some(p=>p.archived===archived)&&<p>{archived?'No archived plans.':'No active plans. Create a plan to get started.'}</p>}</div>}
  </main>;
 }
+
 
 
 
