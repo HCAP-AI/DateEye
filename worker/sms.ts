@@ -25,11 +25,11 @@ export function smsConfig(env:SmsEnv){
  return u.origin;
 }
 export function smsText(job:{kind:string;eventName:string;organiser:string;planId:string},origin:string){
- // ASCII content reduces unexpected Unicode segmentation. Keep names short.
- const clean=(v:string,n:number)=>v.replace(/[^\x20-\x7E]/g,'').slice(0,n);
+ // Keep each name on one line while preserving its spelling.
+ const clean=(v:string,n:number)=>v.replace(/\s+/g,' ').trim().slice(0,n);
  const link=origin+'/?plan='+job.planId+'&via=sms';
  return job.kind==='reminder'?`prod. Reminder: share your availability for ${clean(job.eventName,35)}: ${link} Reply STOP to stop texts.`:
- `prod. ${clean(job.organiser,25)} invites you to ${clean(job.eventName,35)}. Share your availability: ${link} Reply STOP to stop texts.`;
+ `${clean(job.organiser,80)} has invited you to ${clean(job.eventName,120)}\nShare your availability - ${link}\nReply STOP to stop texts\nprod.`;
 }
 export async function processSms(env:SmsEnv,rpc:Rpc){
  if(env.SMS_ENABLED!=='true')return;
