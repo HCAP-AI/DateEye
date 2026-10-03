@@ -6,5 +6,5 @@
   "compatibility_date": "2025-10-01",
   "assets": {"directory":"./dist", "binding":"ASSETS", "not_found_handling":"single-page-application", "run_worker_first":["/api/*"]},
   "triggers": {"crons":["*/5 * * * *"]},
-  "vars": {"SUPABASE_URL":"https://qtxuehkexzbdzzxbkvaf.supabase.co", "ADMIN_EMAIL":"office@hound-capital.com", "SMS_PUBLIC_ORIGIN":"https://prod-plan.com", "SMS_ENABLED":"true", "SMS_DAILY_LIMIT":"50", "EMAIL_ENABLED":"true", "EMAIL_DAILY_LIMIT":"50"}
+  "vars": {"SUPABASE_URL":"https://qtxuehkexzbdzzxbkvaf.supabase.co", "ADMIN_EMAIL":"office@hound-capital.com", "SMS_PUBLIC_ORIGIN":"https://prod-plan.com", "SMS_ENABLED":"true", "SMS_DAILY_LIMIT":"50", "EMAIL_ENABLED":"true", "EMAIL_FROM":"invites@prod-plan.com", "EMAIL_DAILY_LIMIT":"50"}
 }
