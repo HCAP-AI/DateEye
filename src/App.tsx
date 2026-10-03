@@ -26,7 +26,6 @@ function Home({planId,onPlans,guest=false}:{planId:string|null;onPlans:()=>void;
   const [resolvedPlan,setResolvedPlan]=useState(planId);
   const [invitations,setInvitations]=useState<{id:string;name:string}[]>([]);
   const fetch=(url:string,init?:RequestInit)=>window.fetch(url==="/api/state"?url+(resolvedPlan?"?plan="+encodeURIComponent(resolvedPlan):""):url,init);
-  const [adminLogin, setAdminLogin] = useState(window.location.pathname === "/admin");
   const [state, setState] = useState<AppState | null>(null);
   const [selectedMember, setSelectedMember] = useState("");
   const [month, setMonth] = useState(new Date());
@@ -155,7 +154,6 @@ function Home({planId,onPlans,guest=false}:{planId:string|null;onPlans:()=>void;
     return () => lifecycle.abort();
   }, [state?.event, state?.members, state?.viewer.memberId, participantEmail, load]);
 
-  if (adminLogin) return <AdminLogin onDone={()=>{setAdminLogin(false);setParticipantEmail("");window.location.assign("/manage"+(resolvedPlan?"?plan="+resolvedPlan:""));}} onBack={()=>{setAdminLogin(false);window.history.replaceState({},"","/");}}/>;
 
   if (needsEmail) return <main className="setup-shell"><section className="setup-card">
     <BrandLogo/><h1>When are you free?</h1>
@@ -169,10 +167,10 @@ function Home({planId,onPlans,guest=false}:{planId:string|null;onPlans:()=>void;
     </form>
     {invitations.length>0&&<div className="plan-list"><h2>Choose your event</h2>{invitations.map(p=><button key={p.id} onClick={()=>{setInvitations([]);setResolvedPlan(p.id);}}>{p.name}</button>)}</div>}
     <p className="pilot-note">Only invited contact details can open an event. Group members can see names and availability.</p>
-    <button className="admin-link" onClick={()=>setAdminLogin(true)}>Administrator sign-in</button>
+    <a className="admin-link" href="/signin">Organiser sign-in</a>
   </section></main>;
 
-  if (!state) return <main className="center">{!error&&<div className="loader" />}<p role="status">{error || "Opening your calendar…"}</p>{error&&<><button onClick={()=>setAdminLogin(true)}>Administrator sign-in</button><button onClick={()=>void load()}>Try again</button></>}</main>;
+  if (!state) return <main className="center">{!error&&<div className="loader" />}<p role="status">{error || "Opening your calendar…"}</p>{error&&<><a className="admin-link" href="/signin">Organiser sign-in</a><button onClick={()=>void load()}>Try again</button></>}</main>;
 
   if(!state.event && !state.viewer.isAdmin) return <main className="center"><h1>prod.</h1><p>Your administrator has not created a plan yet.</p></main>;
 
@@ -331,15 +329,10 @@ function MemberEditor({member,onSave}:{member?:Member;onSave:(payload:unknown)=>
   </form>;
 }
 
-function AdminLogin({onDone,onBack}:{onDone:()=>void;onBack:()=>void}) {
- const [error,setError]=useState(""); const [busy,setBusy]=useState(false);
- return <main className="setup-shell"><section className="setup-card"><BrandLogo/><h1>Administrator sign-in</h1>
- <form onSubmit={async e=>{e.preventDefault();const form=new FormData(e.currentTarget);setBusy(true);setError("");try{const r=await fetch("/api/login",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({email:form.get("email"),password:form.get("password")})});if(!r.ok){const data=await r.json();throw new Error(data.error||"Sign-in failed.");}onDone();}catch(e){setError(e instanceof Error?e.message:"Sign-in failed.");}finally{setBusy(false);}}}>
- <label>Email<input name="email" type="email" autoComplete="username" required/></label>
- <label>Password<input name="password" type="password" autoComplete="current-password" required/></label>
- {error&&<p className="error" role="alert">{error}</p>}<button className="primary" disabled={busy}>{busy?"Signing in…":"Sign in"}</button></form><button className="admin-link" onClick={onBack}>Back to invitee entry</button></section></main>;
+function LegacySignInRedirect(){
+ useEffect(()=>{window.location.replace('/signin');},[]);
+ return <main className="center"><a href="/signin">Continue to organiser sign-in</a></main>;
 }
-
 
 type PlanSummary={id:string;name:string;startDate:string;endDate:string;archived:boolean};
 export default function App(){
@@ -355,7 +348,7 @@ export default function App(){
  else if(url.pathname==='/auth/confirmed')page=<ConfirmationReturn onReady={()=>navigate('/manage?plan=new')}/>;
  else if(manage)page=<InviterGate key="manage" onReady={()=>{}}>{plan?<Home key={plan} planId={plan} onPlans={()=>navigate('/manage')}/>:<Plans onOpen={open} onGuest={()=>navigate('/signin')}/>}</InviterGate>;
  else if(url.pathname==='/register'||url.pathname==='/signin')page=<InviterGate key={url.pathname} register={url.pathname==='/register'} onReady={()=>navigate(url.pathname==='/register'?'/manage?plan=new':'/manage')}/>;
- else if(url.pathname==='/admin')page=<AdminLogin onDone={()=>navigate('/manage')} onBack={()=>navigate('/')}/>;
+ else if(url.pathname==='/admin')page=<LegacySignInRedirect/>;
  else if(plan||url.pathname==='/respond')page=<Home key={plan||'guest'} guest planId={plan} onPlans={()=>navigate('/manage')}/>;
  else page=<main className="landing"><BrandLogo/><section className="landing-intro"><p className="eyebrow">LESS BACK AND FORTH. MORE GETTING TOGETHER.</p><h1>Good plans start<br/>with a little prod.</h1><p>Bring your people together. Find a date that works.</p></section><div className="landing-choices"><section><CalendarDays size={30}/><h2>Make a plan</h2><p>A catch-up, a weekend away, or something worth getting everyone together for.</p><button className="primary" onClick={()=>navigate('/register')}>Create an event <ChevronRight size={18}/></button><button className="admin-link" onClick={()=>navigate('/signin')}>Already registered? Sign in</button></section><section><Users size={30}/><h2>Been invited?</h2><p>Let your friends know when you’re free and get the plan moving.</p><button className="primary guest-cta" onClick={()=>navigate('/respond')}>Respond to an invitation <ChevronRight size={18}/></button><p className="landing-hint">Have an event link? Open it to go straight to your event.</p></section></div></main>;
  return <div className="site-frame"><div className="site-content">{page}</div><footer className="site-footer"><BrandLogo/><small>© Hound Capital Ltd 2026</small><a href="/terms">terms.</a><a href="mailto:office@hound-capital.com" className="help-button">Help!</a></footer></div>;
@@ -396,7 +389,7 @@ function InviterGate({children,register=false,onReady,confirmedEmail=''}:{childr
  {stage==='code'&&<label>Sign-in code<input name="code" inputMode="numeric" autoComplete="one-time-code" pattern="[0-9]{6,10}" required maxLength={10}/></label>}
  {error&&<p className="error" role="alert">{error}</p>}<button className="primary" disabled={busy}>{busy?'Please wait…':stage==='code'?'Verify email':stage==='profile'?'Continue to event':stage==='register'?'Register':stage==='terms'?'Agree and continue':'Send sign-in code'}</button></form>
  {stage==='code'&&<button className="admin-link" disabled={busy} onClick={()=>{setError('');setStage(details.name?'register':'email');}}>Change email or request another code</button>}
- <a className="admin-link" href="/">Back to home</a><a className="admin-link" href="/admin">Existing administrator password sign-in</a></section></main>;
+ <a className="admin-link" href="/">Back to home</a></section></main>;
 }
 
 function Plans({onOpen,onGuest}:{onOpen:(id:string)=>void;onGuest:()=>void}){

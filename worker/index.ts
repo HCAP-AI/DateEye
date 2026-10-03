@@ -44,6 +44,7 @@ async function phoneUser(request:Request,env:Env){
 }
 export default {async scheduled(_controller:unknown,env:Env,ctx:{waitUntil:(p:Promise<unknown>)=>void}){ctx.waitUntil(Promise.all([processSms(env,(n,d)=>rpc(env,n,d)),processEmail(env,(n,d)=>rpc(env,n,d))]));},async fetch(request:Request,env:Env):Promise<Response>{
  const path=new URL(request.url).pathname;
+ if(path==='/admin'||path==='/admin/')return Response.redirect(new URL('/signin',request.url).href,302);
  if(!path.startsWith('/api/'))return env.ASSETS.fetch(request);
  try{
   const smsRpc=(n:string,d:Record<string,unknown>)=>rpc(env,n,d);
