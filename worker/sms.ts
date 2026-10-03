@@ -14,7 +14,8 @@ export async function hash(value:string){return Array.from(new Uint8Array(await 
 export async function phoneRate(rpc:Rpc,phone:string,ip:string,verify=false){
  const key=verify?'verify':'otp';
  const ids=await Promise.all([hash(phone),hash(ip)]);
- if(!verify&&!await rpc('prod_sms_rate',{p_keys:[key+':minute:'+ids[0]],p_max:1,p_seconds:60}))throw new AccessError('Please wait a minute before requesting another text.',429);
+ const resendSeconds=phone.startsWith('email:')?60:30;
+ if(!verify&&!await rpc('prod_sms_rate',{p_keys:[key+':minute:'+ids[0]],p_max:1,p_seconds:resendSeconds}))throw new AccessError(`Please wait ${resendSeconds} seconds before requesting another code.`,429);
  if(!await rpc('prod_sms_rate',{p_keys:ids.map(x=>key+':hour:'+x),p_max:verify?20:5,p_seconds:3600}))throw new AccessError('Too many attempts. Please try later.',429);
  if(!verify&&!await rpc('prod_sms_rate',{p_keys:['otp:day:'+ids[1]],p_max:20,p_seconds:86400}))throw new AccessError('Daily text limit reached. Please try tomorrow.',429);
 }
