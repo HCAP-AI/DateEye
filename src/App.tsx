@@ -241,7 +241,7 @@ function Home({planId,onPlans,guest=false}:{planId:string|null;onPlans:()=>void;
           <div className="event-head"><div><p className="eyebrow">SHARED PLAN</p><h1>{event.name}</h1><p>{parseLocal(event.startDate).toLocaleDateString("en-GB",{day:"numeric",month:"long"})} – {parseLocal(event.endDate).toLocaleDateString("en-GB",{day:"numeric",month:"long",year:"numeric"})}</p></div><div className="people-pill"><Users size={16}/>{total} people</div></div>
           <div className="mobile-tabs"><button className={view==="calendar"?"active":""} onClick={()=>setView("calendar")}>Calendar</button><button className={view==="results"?"active":""} onClick={()=>setView("results")}>Best dates</button></div>
           <div className={view==="calendar"?"calendar-wrap":"calendar-wrap mobile-hidden"}>
-            <div className="identity-row"><strong>{activeName ? activeName+" · My availability" : "Group calendar · Read only"}</strong><span>{event.archived ? "Archived · Read only" : activeName ? "Tap dates when you’re free" : "Assign your email to your name in Event settings."}</span></div>
+            <div className="identity-row"><strong>{activeName ? activeName+" · My availability" : "Group calendar · Read only"}</strong><span>{event.archived ? "Archived · Read only" : activeName ? "Tap dates when you’re free" : "Add your mobile number to your name in Event settings."}</span></div>
             <div className="month-nav"><button aria-label="Previous month" onClick={()=>setMonth(new Date(month.getFullYear(),month.getMonth()-1,1))}><ChevronLeft/></button><h2>{month.toLocaleDateString("en-GB",{month:"long",year:"numeric"})}</h2><button aria-label="Next month" onClick={()=>setMonth(new Date(month.getFullYear(),month.getMonth()+1,1))}><ChevronRight/></button></div>
             <div className="calendar-grid weekday-row">{weekDays.map(d=><span key={d}>{d}</span>)}</div>
             <div className="calendar-grid">{cells.map((date,i)=>{
@@ -389,28 +389,63 @@ function ConfirmationReturn({onReady}:{onReady:()=>void}){
 }
 
 function InviterGate({children,register=false,onReady,confirmedEmail=''}:{children?:React.ReactNode;register?:boolean;onReady:()=>void;confirmedEmail?:string}){
- const [stage,setStage]=useState(confirmedEmail?'code':'loading'),[email,setEmail]=useState(confirmedEmail),[error,setError]=useState(''),[busy,setBusy]=useState(false);
+ const [stage,setStage]=useState(confirmedEmail?'emailCode':'loading'),[phone,setPhone]=useState(''),[email,setEmail]=useState(confirmedEmail),[error,setError]=useState(''),[busy,setBusy]=useState(false);
  const [details,setDetails]=useState({name:'',sex:'',ageRange:'',termsVersion:TERMS_VERSION,termsAccepted:false});
- async function api(path:string,data?:unknown){const r=await window.fetch(path,data===undefined?{cache:'no-store'}:{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});const d=await r.json();if(!r.ok)throw Error(d.error||'Please try again.');return d;}
- async function check(){try{const d=await api('/api/profile');setEmail(d.email);if(d.profile){if(d.termsVersion!==TERMS_VERSION)setStage('terms');else{setStage('ready');if(!children)onReady();}}else setStage('profile');}catch{setStage(register?'register':'email');}}
+ const sending=useRef(false);
+ async function api(path:string,data?:unknown){const r=await window.fetch(path,data===undefined?{cache:'no-store'}:{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});const d=await r.json();if(!r.ok)throw Object.assign(Error(d.error||'Please try again.'),{status:r.status});return d;}
+ async function check(){try{
+  let d=await api('/api/profile');
+  if(!d.profile&&d.phone&&details.name&&details.termsAccepted)d=await api('/api/profile',details);
+  setEmail(d.email||'');setPhone(d.phone||'');
+  if(d.profile)setDetails({...d.profile,termsVersion:TERMS_VERSION,termsAccepted:d.termsVersion===TERMS_VERSION});
+  if(!d.phone)setStage('linkPhone');else if(!d.profile)setStage('profile');else if(d.termsVersion!==TERMS_VERSION)setStage('terms');else{setStage('ready');if(!children)onReady();}
+ }catch(e){if((e as {status?:number}).status===401)setStage(register?'register':'phone');else{setError(e instanceof Error?e.message:'Could not load your account.');setStage('retry');}}}
  useEffect(()=>{if(!confirmedEmail)void check();},[]);
- async function submit(form:FormData){setBusy(true);setError('');try{
- if(stage==='register'||stage==='email'){const e=String(form.get('email')).trim();setEmail(e);if(stage==='register'){if(!['18–24','25–34','35–44','45–54','55–64','65+'].includes(String(form.get('ageRange'))))throw Error('You must be 18 or over to register. No email has been sent.');if(form.get('termsAccepted')!=='on')throw Error('Please agree to the Terms.');setDetails({name:String(form.get('name')),sex:String(form.get('sex')),ageRange:String(form.get('ageRange')),termsVersion:TERMS_VERSION,termsAccepted:true});}await api('/api/send-code',{email:e,...(stage==='register'?{profile:{name:String(form.get('name')),sex:String(form.get('sex')),ageRange:String(form.get('ageRange')),termsVersion:TERMS_VERSION,termsAccepted:true}}:{})});setStage(stage==='register'?'confirmation':'code');}
- else if(stage==='code'){await api('/api/verify-code',{email,code:String(form.get('code')).trim()});if(details.name){try{await api('/api/profile',details);}catch(e){setStage('profile');throw e;}}await check();}
- else if(stage==='profile'){await api('/api/profile',{name:form.get('name'),sex:form.get('sex'),ageRange:form.get('ageRange'),termsVersion:TERMS_VERSION,termsAccepted:form.get('termsAccepted')==='on'});setStage('ready');if(!children)onReady();}
- else if(stage==='terms'){await api('/api/accept-terms',{termsVersion:TERMS_VERSION,termsAccepted:form.get('termsAccepted')==='on'});setStage('ready');if(!children)onReady();}
- }catch(e){setError(e instanceof Error?e.message:'Please try again.');}finally{setBusy(false);}}
- if(stage==='confirmation')return <main className="setup-shell"><section className="setup-card"><BrandLogo/><h1>Check your email</h1><p>Open the confirmation link sent to {email}. Once confirmed, we’ll send your sign-in code automatically.</p><p>Already registered? Your email may contain a sign-in code instead.</p><button className="primary" onClick={()=>setStage('code')}>Enter a sign-in code</button><button className="admin-link" onClick={()=>setStage('register')}>Change details or resend</button></section></main>;
+ async function submit(form:FormData){if(sending.current)return;sending.current=true;setBusy(true);setError('');try{
+  if(stage==='register'||stage==='phone'){
+   const number=String(form.get('phone')||'').trim();let profile;
+   if(stage==='register'){
+    if(!['18–24','25–34','35–44','45–54','55–64','65+'].includes(String(form.get('ageRange'))))throw Error('You must be 18 or over to register. No text has been sent.');
+    if(form.get('termsAccepted')!=='on')throw Error('Please agree to the Terms.');
+    profile={name:String(form.get('name')),sex:String(form.get('sex')),ageRange:String(form.get('ageRange')),termsVersion:TERMS_VERSION,termsAccepted:true};setDetails(profile);
+   }
+   const d=await api('/api/organiser/send-code',{phone:number,...(profile?{profile}:{})});setPhone(d.phone);setStage('code');
+  }else if(stage==='code'){
+   await api('/api/organiser/verify-code',{phone,code:String(form.get('code')).trim()});
+   setStage('loading');
+   await check();
+  }else if(stage==='email'){
+   const address=String(form.get('email')||'').trim();await api('/api/send-code',{email:address});setEmail(address);setStage('emailCode');
+  }else if(stage==='emailCode'){
+   await api('/api/verify-code',{email,code:String(form.get('code')).trim()});await check();
+  }else if(stage==='linkPhone'){
+   const d=await api('/api/organiser/link-phone',{phone:String(form.get('phone')||'').trim()});setPhone(d.phone);setStage('linkCode');
+  }else if(stage==='linkCode'){
+   await api('/api/organiser/verify-link',{phone,code:String(form.get('code')).trim()});await check();
+  }else if(stage==='profile'){
+   await api('/api/profile',{name:form.get('name'),sex:form.get('sex'),ageRange:form.get('ageRange'),termsVersion:TERMS_VERSION,termsAccepted:form.get('termsAccepted')==='on'});await check();
+  }else if(stage==='terms'){
+   await api('/api/accept-terms',{termsVersion:TERMS_VERSION,termsAccepted:form.get('termsAccepted')==='on'});await check();
+  }
+ }catch(e){setError(e instanceof Error?e.message:'Please try again.');}finally{sending.current=false;setBusy(false);}}
  if(stage==='ready')return <>{children||<p className="center">Opening your event…</p>}</>;
  if(stage==='loading')return <p className="center">Opening your account…</p>;
- return <main className="setup-shell"><section className="setup-card"><BrandLogo/><h1>{stage==='terms'?'Updated terms':stage==='code'?'Check your email':stage==='profile'?'Your details':stage==='register'?'Let’s make a plan.':'Welcome back.'}</h1><p className="intro">{stage==='code'?`Enter the sign-in code sent to ${email}.`:stage==='register'?'Register once, then create your event.':stage==='profile'?'Complete your details before creating an event.':'Enter your email and we’ll send you a sign-in code.'}</p><form onSubmit={e=>{e.preventDefault();void submit(new FormData(e.currentTarget));}}>
- {(stage==='register'||stage==='profile')&&<><label>Name<input name="name" autoComplete="name" maxLength={80} required defaultValue={details.name}/></label></>}
- {(stage==='register'||stage==='email')&&<label>Email<input name="email" type="email" autoComplete="email" required maxLength={254} defaultValue={email}/></label>}
+ const codeStage=['code','emailCode','linkCode'].includes(stage);
+ const heading=stage==='terms'?'Updated terms':stage==='emailCode'?'Check your email':codeStage?'Check your texts':stage==='profile'?'Your details':stage==='register'?'Let’s make a plan.':stage==='linkPhone'?'Switch to mobile sign-in':stage==='email'?'Keep your existing plans':'Welcome back.';
+ const intro=stage==='emailCode'?`Enter the code sent to ${email}.`:codeStage?`Enter the sign-in code sent to ${phone}.`:stage==='register'?'Register with your mobile number, then create your event.':stage==='profile'?'Complete your details before creating an event.':stage==='linkPhone'?'Verify your mobile number once to keep your existing account and plans. Future sign-ins will use a text code.':stage==='email'?'Use your existing email once, then add a mobile number to the same account.':stage==='terms'?'Please review and accept the current terms.':'Enter your mobile number and we’ll text you a sign-in code.';
+ return <main className="setup-shell"><section className="setup-card"><BrandLogo/><h1>{heading}</h1><p className="intro">{intro}</p>
+ {stage==='retry'?<><p className="error" role="alert">{error}</p><button className="primary" onClick={()=>void check()}>Retry loading account</button></>:<form onSubmit={e=>{e.preventDefault();void submit(new FormData(e.currentTarget));}}>
+ {(stage==='register'||stage==='profile')&&<label>Name<input name="name" autoComplete="name" maxLength={80} required defaultValue={details.name}/></label>}
+ {['register','phone','linkPhone'].includes(stage)&&<label>UK mobile number<input name="phone" type="tel" autoComplete="tel" required maxLength={40} defaultValue={phone} placeholder="07700 900123"/></label>}
+ {stage==='email'&&<label>Existing account email<input name="email" type="email" autoComplete="email" required maxLength={254} defaultValue={email}/></label>}
  {(stage==='register'||stage==='profile')&&<><label>Sex<select name="sex" required defaultValue={details.sex}><option value="" disabled>Select</option>{['Female','Male','Intersex','Prefer not to say'].map(x=><option key={x}>{x}</option>)}</select></label><label>Age range<select name="ageRange" required defaultValue={details.ageRange}><option value="" disabled>Select</option>{['Under 18','18–24','25–34','35–44','45–54','55–64','65+','Prefer not to say'].map(x=><option key={x}>{x}</option>)}</select></label><p className="pilot-note">Your registration details are private and are not shown to invitees.</p></>}
  {(stage==='register'||stage==='profile'||stage==='terms')&&<label className="terms-check"><input name="termsAccepted" type="checkbox" required/><span className="terms-check-copy">I agree to the <a href="/terms#terms" target="_blank" rel="noopener noreferrer">Terms of Service</a> and acknowledge the <a href="/terms#privacy" target="_blank" rel="noopener noreferrer">Privacy Policy</a>.</span></label>}
- {stage==='code'&&<label>Sign-in code<input name="code" inputMode="numeric" autoComplete="one-time-code" pattern="[0-9]{6,10}" required maxLength={10}/></label>}
- {error&&<p className="error" role="alert">{error}</p>}<button className="primary" disabled={busy}>{busy?'Please wait…':stage==='code'?'Verify email':stage==='profile'?'Continue to event':stage==='register'?'Register':stage==='terms'?'Agree and continue':'Send sign-in code'}</button></form>
- {stage==='code'&&<button className="admin-link" disabled={busy} onClick={()=>{setError('');setStage(details.name?'register':'email');}}>Change email or request another code</button>}
+ {codeStage&&<label>Sign-in code<input name="code" inputMode="numeric" autoComplete="one-time-code" pattern="[0-9]{6,10}" required maxLength={10}/></label>}
+ {stage==='code'&&!details.name&&<p className="pilot-note">Codes are sent to registered numbers. If you registered with email, use “Switch an email account to mobile” below.</p>}
+ {error&&<p className="error" role="alert">{error}</p>}<button className="primary" disabled={busy}>{busy?'Please wait…':stage==='emailCode'?'Verify email':codeStage?'Verify mobile':stage==='profile'?'Continue to event':stage==='register'?'Register':stage==='terms'?'Agree and continue':stage==='email'?'Send email code':'Send text code'}</button></form>}
+ {codeStage&&<button className="admin-link" disabled={busy} onClick={()=>{setError('');setStage(stage==='emailCode'?'email':stage==='linkCode'?'linkPhone':details.name?'register':'phone');}}>Change {stage==='emailCode'?'email':'number'} or request another code</button>}
+ {['register','phone','code'].includes(stage)&&<button className="admin-link" disabled={busy} onClick={()=>{setError('');setStage('email');}}>Switch an email account to mobile</button>}
+ {stage==='email'&&<button className="admin-link" disabled={busy} onClick={()=>{setError('');setStage('phone');}}>Back to mobile sign-in</button>}
  <a className="admin-link" href="/">Back to home</a></section></main>;
 }
 

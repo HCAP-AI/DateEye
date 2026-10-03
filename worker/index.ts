@@ -43,6 +43,23 @@ async function phoneUser(request:Request,env:Env){
  const u=await r.json() as {id:string;phone?:string;phone_confirmed_at?:string};if(!u.phone_confirmed_at||!u.phone)throw new AccessError('Please verify your mobile number.',401);
  return u;
 }
+type AuthUser={id:string;email?:string;email_confirmed_at?:string;phone?:string;phone_confirmed_at?:string};
+const verifiedUser=(u:AuthUser)=>!!((u.email&&u.email_confirmed_at)||(u.phone&&u.phone_confirmed_at));
+async function organiserUser(request:Request,env:Env){
+ const token=cookie(request);if(!token)throw new AccessError('Please sign in.',401);
+ const r=await supa(env,'/auth/v1/user',{headers:{Authorization:'Bearer '+token}});
+ if(!r.ok)throw new AccessError('Please sign in again.',401);
+ const u=await r.json() as AuthUser;if(!verifiedUser(u))throw new AccessError('Please verify your mobile number.',403);
+ return {u,token};
+}
+function registrationProfile(value:unknown){
+ if(!value||typeof value!=='object'||Array.isArray(value))throw new AccessError('Complete your registration details.',400);
+ const p=value as Record<string,unknown>;
+ if(!['18–24','25–34','35–44','45–54','55–64','65+'].includes(String(p.ageRange)))throw new AccessError('You must be 18 or over to register.',403);
+ if(p.termsVersion!=='2026-09-27'||p.termsAccepted!==true)throw new AccessError('Please agree to the Terms of Service.',400);
+ if(typeof p.name!=='string'||!p.name.trim()||p.name.trim().length>80||!['Female','Male','Intersex','Prefer not to say'].includes(String(p.sex)))throw new AccessError('Please check your registration details.',400);
+ return {name:p.name.trim(),sex:p.sex,ageRange:p.ageRange,termsVersion:p.termsVersion,termsAccepted:true};
+}
 export default {async scheduled(_controller:unknown,env:Env,ctx:{waitUntil:(p:Promise<unknown>)=>void}){ctx.waitUntil(Promise.all([processSms(env,(n,d)=>rpc(env,n,d)),processEmail(env,(n,d)=>rpc(env,n,d)),processReports(env,(n,d)=>rpc(env,n,d))]));},async fetch(request:Request,env:Env,ctx?:{waitUntil:(p:Promise<unknown>)=>void}):Promise<Response>{
  const path=new URL(request.url).pathname;
  if(path==='/admin'||path==='/admin/')return Response.redirect(new URL('/signin',request.url).href,302);
@@ -104,7 +121,7 @@ export default {async scheduled(_controller:unknown,env:Env,ctx:{waitUntil:(p:Pr
    const b=await body(request);if(!uuid(b.planId))throw new AccessError('Choose an event.',400);
    const token=cookie(request);if(!token)throw new AccessError('Please sign in as organiser.',401);
    const r=await supa(env,'/auth/v1/user',{headers:{Authorization:'Bearer '+token}});if(!r.ok)throw new AccessError('Please sign in again.',401);
-   const u=await r.json() as {id:string;email_confirmed_at?:string};if(!u.email_confirmed_at)throw new AccessError('Organiser access required.',403);
+   const u=await r.json() as AuthUser;if(!verifiedUser(u))throw new AccessError('Organiser access required.',403);
    const sms=env.SMS_ENABLED==='true'&&!!env.TWILIO_ACCOUNT_SID&&!!env.TWILIO_AUTH_TOKEN&&!!env.TWILIO_MESSAGING_SERVICE_SID;
    return json(await smsRpc('prod_invites_queue',{p_user:u.id,p_plan:b.planId,p_sms:sms,p_email:emailConfigured(env)}));
   }
@@ -119,7 +136,7 @@ export default {async scheduled(_controller:unknown,env:Env,ctx:{waitUntil:(p:Pr
    if(env.SMS_ENABLED!=='true')throw new AccessError('SMS sending is not enabled yet.',503);
    const token=cookie(request);if(!token)throw new AccessError('Please sign in as organiser.',401);
    const r=await supa(env,'/auth/v1/user',{headers:{Authorization:'Bearer '+token}});if(!r.ok)throw new AccessError('Please sign in again.',401);
-   const u=await r.json() as {id:string;email_confirmed_at?:string};if(!u.email_confirmed_at)throw new AccessError('Organiser access required.',403);
+   const u=await r.json() as AuthUser;if(!verifiedUser(u))throw new AccessError('Organiser access required.',403);
    return json(await smsRpc('prod_sms_queue',{p_user:u.id,p_plan:b.planId}));
   }
   if(path==='/api/age-confirm'&&request.method==='POST'){
@@ -135,15 +152,57 @@ export default {async scheduled(_controller:unknown,env:Env,ctx:{waitUntil:(p:Pr
    if(!r.ok)throw new AccessError('Could not find invitations. Please try again.',502);
    return json(await r.json());
   }
-  if(path==='/api/send-code'&&request.method==='POST'){
-   const b=await body(request);const email=String(b.email||'').trim().toLowerCase();
-   if(email.length>254||!/^\S+@[^\s@]+\.[^\s@]+$/.test(email))throw new AccessError('Please enter a valid email.',400);
-   if(b.profile){const p=b.profile as Record<string,unknown>;
-    if(!['18–24','25–34','35–44','45–54','55–64','65+'].includes(String(p.ageRange)))throw new AccessError('You must be 18 or over to register.',403);
-    if(p.termsVersion!=='2026-09-27'||p.termsAccepted!==true)throw new AccessError('Please agree to the Terms of Service.',400);
+  if(path==='/api/organiser/send-code'&&request.method==='POST'){
+   const b=await body(request),phone=normalPhone(b.phone);
+   const profile=b.profile===undefined?undefined:registrationProfile(b.profile);
+   await phoneRate(smsRpc,phone,request.headers.get('cf-connecting-ip')||'local');
+   const r=await supa(env,'/auth/v1/otp',{method:'POST',body:JSON.stringify({phone,channel:'sms',create_user:!!profile,...(profile?{data:{prod_profile:profile}}:{})})});
+   if(!r.ok){const d=await r.json() as {error_code?:string};
+    if(d.error_code==='otp_disabled'&&!profile)return json({ok:true,phone}); // Do not disclose unregistered numbers.
+    throw new AccessError(r.status===429?'Please wait before requesting another text.':'Could not send a text code. Please try again or contact support.',r.status===429?429:502);
    }
-   const r=await supa(env,'/auth/v1/otp?redirect_to='+encodeURIComponent(new URL(request.url).origin+'/auth/confirmed'),{method:'POST',body:JSON.stringify({email,create_user:true,...(b.profile?{data:{prod_profile:b.profile}}:{})})});
-   if(!r.ok)throw new AccessError(r.status===429?'Please wait before requesting another code.':'Could not send a code. Please try again.',r.status===429?429:502);
+   return json({ok:true,phone});
+  }
+  if(path==='/api/organiser/verify-code'&&request.method==='POST'){
+   const b=await body(request),phone=normalPhone(b.phone);
+   if(typeof b.code!=='string'||!/^\d{6,10}$/.test(b.code))throw new AccessError('Enter the code from your text.',400);
+   await phoneRate(smsRpc,phone,request.headers.get('cf-connecting-ip')||'local',true);
+   const r=await supa(env,'/auth/v1/verify',{method:'POST',body:JSON.stringify({phone,token:b.code,type:'sms'})});
+   if(!r.ok)throw new AccessError('The text code is invalid or expired. Request a new one.',401);
+   const d=await r.json() as {access_token:string;expires_in:number;user:AuthUser};
+   if(!d.access_token||!d.user.phone_confirmed_at||normalPhone('+'+(d.user.phone||'').replace(/^\+/,''))!==phone)throw new AccessError('Phone verification failed.',401);
+   return json({ok:true},200,{'Set-Cookie':cookieValue(request,d.access_token,Math.min(d.expires_in,3600))});
+  }
+  if(path==='/api/organiser/link-phone'&&request.method==='POST'){
+   const b=await body(request),phone=normalPhone(b.phone),{u,token}=await organiserUser(request,env);
+   if(u.phone_confirmed_at)throw new AccessError('This account already has a verified mobile number. Sign in with that number.',409);
+   if(!u.email_confirmed_at)throw new AccessError('Sign in to your existing email account first.',403);
+   await phoneRate(smsRpc,phone,request.headers.get('cf-connecting-ip')||'local');
+   const r=await supa(env,'/auth/v1/user',{method:'PUT',headers:{Authorization:'Bearer '+token},body:JSON.stringify({phone})});
+   if(!r.ok)throw new AccessError(r.status===429?'Please wait before requesting another text.':'Could not add that number. It may already belong to another account; contact support if needed.',r.status===429?429:400);
+   return json({ok:true,phone});
+  }
+  if(path==='/api/organiser/verify-link'&&request.method==='POST'){
+   const b=await body(request),phone=normalPhone(b.phone),{u,token}=await organiserUser(request,env);
+   if(!u.email_confirmed_at||u.phone_confirmed_at)throw new AccessError('Please sign in to the email account you want to switch.',403);
+   if(typeof b.code!=='string'||!/^\d{6,10}$/.test(b.code))throw new AccessError('Enter the code from your text.',400);
+   await phoneRate(smsRpc,phone,request.headers.get('cf-connecting-ip')||'local',true);
+   const r=await supa(env,'/auth/v1/verify',{method:'POST',body:JSON.stringify({phone,token:b.code,type:'phone_change'})});
+   if(!r.ok)throw new AccessError('The text code is invalid or expired. Request a new one.',401);
+   // Keep the original identity and ownership; never adopt a different user returned by verification.
+   const fresh=await supa(env,'/auth/v1/user',{headers:{Authorization:'Bearer '+token}});
+   if(!fresh.ok)throw new AccessError('Please sign in again to finish switching.',401);
+   const linked=await fresh.json() as AuthUser;
+   if(linked.id!==u.id||!linked.phone_confirmed_at||normalPhone('+'+(linked.phone||'').replace(/^\+/,''))!==phone)throw new AccessError('Could not confirm the number on this account. Contact support.',409);
+   return json({ok:true});
+  }
+  if(path==='/api/send-code'&&request.method==='POST'){
+   const b=await body(request),email=String(b.email||'').trim().toLowerCase();
+   if(b.profile)registrationProfile(b.profile);
+   if(email.length>254||!/^\S+@[^\s@]+\.[^\s@]+$/.test(email))throw new AccessError('Please enter a valid email.',400);
+   await phoneRate(smsRpc,'email:'+email,request.headers.get('cf-connecting-ip')||'local');
+   const r=await supa(env,'/auth/v1/otp',{method:'POST',body:JSON.stringify({email,create_user:false})});
+   if(!r.ok){const d=await r.json() as {error_code?:string};if(d.error_code!=='otp_disabled')throw new AccessError(r.status===429?'Please wait before requesting another code.':'Could not send a code. Please try again.',r.status===429?429:502);}
    return json({ok:true});
   }
   if(path==='/api/confirmed'&&request.method==='POST'){
@@ -168,10 +227,12 @@ export default {async scheduled(_controller:unknown,env:Env,ctx:{waitUntil:(p:Pr
   if(path==='/api/verify-code'&&request.method==='POST'){
    const b=await body(request);
    if(typeof b.email!=='string'||typeof b.code!=='string'||!/^\d{6,10}$/.test(b.code))throw new AccessError('Enter the code from your email.',400);
+   await phoneRate(smsRpc,'email:'+b.email.trim().toLowerCase(),request.headers.get('cf-connecting-ip')||'local',true);
    const r=await supa(env,'/auth/v1/verify',{method:'POST',body:JSON.stringify({email:b.email.trim().toLowerCase(),token:b.code,type:'email'})});
    if(!r.ok)throw new AccessError('The code is invalid or expired. Request a new one.',401);
-   const data=await r.json() as {access_token:string;expires_in:number;user:{email_confirmed_at?:string}};
-   if(!data.user.email_confirmed_at)throw new AccessError('Please verify your email.',403);
+   const data=await r.json() as {access_token:string;expires_in:number;user:AuthUser};
+   if(data.user.phone_confirmed_at)throw new AccessError('This account already uses mobile sign-in. Please request a text code instead.',403);
+   if(!data.user.email_confirmed_at)throw new AccessError('Please verify your mobile number.',403);
    return json({ok:true},200,{'Set-Cookie':cookieValue(request,data.access_token,Math.min(data.expires_in,3600))});
   }
   if(path==='/api/profile'&&['GET','POST'].includes(request.method)){
@@ -179,8 +240,8 @@ export default {async scheduled(_controller:unknown,env:Env,ctx:{waitUntil:(p:Pr
    const token=cookie(request);if(!token)throw new AccessError('Please sign in.',401);
    const auth=await supa(env,'/auth/v1/user',{headers:{Authorization:'Bearer '+token}});
    if(!auth.ok)throw new AccessError('Please sign in again.',401);
-   const u=await auth.json() as {id:string;email_confirmed_at?:string};
-   if(!u.email_confirmed_at)throw new AccessError('Please verify your email.',403);
+   const u=await auth.json() as AuthUser;
+   if(!verifiedUser(u))throw new AccessError('Please verify your mobile number.',403);
    const r=await supa(env,'/rest/v1/rpc/prod_profile',{method:'POST',body:JSON.stringify({p_user:u.id,p_save:request.method==='POST',p_profile:b})},true);
    const data=await r.json() as {message?:string};
    if(!r.ok)throw new AccessError(r.status===400?'Please check your name, sex and age range.':'Registration could not be saved. Check the database upgrade.',400);
@@ -191,7 +252,7 @@ export default {async scheduled(_controller:unknown,env:Env,ctx:{waitUntil:(p:Pr
    const token=cookie(request);if(!token)throw new AccessError('Please sign in.',401);
    const auth=await supa(env,'/auth/v1/user',{headers:{Authorization:'Bearer '+token}});
    if(!auth.ok)throw new AccessError('Please sign in again.',401);
-   const u=await auth.json() as {id:string;email_confirmed_at?:string};if(!u.email_confirmed_at)throw new AccessError('Please verify your email.',403);
+   const u=await auth.json() as AuthUser;if(!verifiedUser(u))throw new AccessError('Please verify your mobile number.',403);
    const r=await supa(env,'/rest/v1/rpc/prod_accept_terms',{method:'POST',body:JSON.stringify({p_user:u.id,p_version:b.termsVersion})},true);
    if(!r.ok)throw new AccessError('Could not record acceptance. Please contact support.',502);
    return json({ok:true});
@@ -201,7 +262,7 @@ export default {async scheduled(_controller:unknown,env:Env,ctx:{waitUntil:(p:Pr
    const token=cookie(request);if(!token)throw new AccessError('Please sign in.',401);
    const auth=await supa(env,'/auth/v1/user',{headers:{Authorization:'Bearer '+token}});
    if(!auth.ok)throw new AccessError('Please sign in again.',401);
-   const u=await auth.json() as {id:string;email_confirmed_at?:string};if(!u.email_confirmed_at)throw new AccessError('Please verify your email.',403);
+   const u=await auth.json() as AuthUser;if(!verifiedUser(u))throw new AccessError('Please verify your mobile number.',403);
    const purge=await supa(env,'/rest/v1/rpc/prod_delete_account',{method:'POST',body:JSON.stringify({p_user:u.id})},true);
    if(!purge.ok)throw new AccessError('Could not delete your plans. Please contact support.',502);
    const deleted=await supa(env,'/auth/v1/admin/users/'+encodeURIComponent(u.id),{method:'DELETE'},true);
@@ -251,11 +312,11 @@ export default {async scheduled(_controller:unknown,env:Env,ctx:{waitUntil:(p:Pr
    email=entry.trim().toLowerCase();if(!email||email.length>254||!/^\S+@[^\s@]+\.[^\s@]+$/.test(email))throw new AccessError('Please enter a valid email.',400);
    // Invitee entry takes precedence over any admin cookie, even for the admin email.
   }else{
-   const token=cookie(request);if(!token)throw new AccessError('Please enter your email address.',401);
+   const token=cookie(request);if(!token)throw new AccessError('Please sign in with your mobile number.',401);
    const r=await supa(env,'/auth/v1/user',{headers:{Authorization:'Bearer '+token}});
    if(!r.ok)throw new AccessError('Your session has expired. Please sign in again.',401);
-   const u=await r.json() as {id:string;email?:string;email_confirmed_at?:string};
-   if(!u.email_confirmed_at)throw new AccessError('Administrator access required.');
+   const u=await r.json() as AuthUser;
+   if(!verifiedUser(u))throw new AccessError('Administrator access required.');
    user=u.id;
   }
   if(request.method==='POST'||(request.method==='PATCH'&&b.action==='event'))validateEvent(b.name,b.startDate,b.endDate);
