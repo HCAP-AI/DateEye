@@ -28,7 +28,7 @@ export function smsText(job:{kind:string;eventName:string;organiser:string;planI
  // Keep each name on one line while preserving its spelling.
  const clean=(v:string,n:number)=>v.replace(/\s+/g,' ').trim().slice(0,n);
  const link=origin+'/?plan='+job.planId+'&via=sms';
- return job.kind==='reminder'?`A reminder about ${clean(job.eventName,120)}\nShare your availability - ${link}\nReply STOP to stop texts\nprod.`:
+ return job.kind==='reminder'?`Just a little prod about ${clean(job.eventName,120)}\nShare your availability - ${link}\nReply STOP to stop texts\nprod.`:
  `${clean(job.organiser,80)} has invited you to ${clean(job.eventName,120)}\nShare your availability - ${link}\nReply STOP to stop texts\nprod.`;
 }
 export async function processSms(env:SmsEnv,rpc:Rpc){
