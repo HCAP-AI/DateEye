@@ -1,8 +1,9 @@
+import {processReports,validUnsubscribe,unsubscribePage,type ReportingEnv} from './reporting.ts';
 import {normalContact,contactRate,emailConfigured,processEmail,type EmailEnv} from './invites.ts';
 
 import {normalPhone,phoneRate,processSms,smsWebhook,uuid, type SmsEnv} from './sms.ts';
 import {AccessError, validateEvent, validateMember, validDate} from './permissions.ts';
-export interface Env extends SmsEnv,EmailEnv {
+export interface Env extends SmsEnv,EmailEnv,ReportingEnv {
  SUPABASE_URL:string; SUPABASE_PUBLISHABLE_KEY:string; SUPABASE_SECRET_KEY:string; ADMIN_EMAIL:string;
  ASSETS:{fetch:(r:Request)=>Promise<Response>};
 }
@@ -42,11 +43,28 @@ async function phoneUser(request:Request,env:Env){
  const u=await r.json() as {id:string;phone?:string;phone_confirmed_at?:string};if(!u.phone_confirmed_at||!u.phone)throw new AccessError('Please verify your mobile number.',401);
  return u;
 }
-export default {async scheduled(_controller:unknown,env:Env,ctx:{waitUntil:(p:Promise<unknown>)=>void}){ctx.waitUntil(Promise.all([processSms(env,(n,d)=>rpc(env,n,d)),processEmail(env,(n,d)=>rpc(env,n,d))]));},async fetch(request:Request,env:Env):Promise<Response>{
+export default {async scheduled(_controller:unknown,env:Env,ctx:{waitUntil:(p:Promise<unknown>)=>void}){ctx.waitUntil(Promise.all([processSms(env,(n,d)=>rpc(env,n,d)),processEmail(env,(n,d)=>rpc(env,n,d)),processReports(env,(n,d)=>rpc(env,n,d))]));},async fetch(request:Request,env:Env,ctx?:{waitUntil:(p:Promise<unknown>)=>void}):Promise<Response>{
  const path=new URL(request.url).pathname;
  if(path==='/admin'||path==='/admin/')return Response.redirect(new URL('/signin',request.url).href,302);
- if(!path.startsWith('/api/'))return env.ASSETS.fetch(request);
+ if(!path.startsWith('/api/')){
+  const response=await env.ASSETS.fetch(request);
+  if(env.REPORTS_ENABLED==='true'&&request.method==='GET'&&response.ok&&response.headers.get('content-type')?.includes('text/html')&&!/bot|crawler|spider|slurp|facebookexternalhit/i.test(request.headers.get('user-agent')||'')){
+   const recorded=rpc(env,'prod_metric',{p_metric:'page_loads'}).catch(()=>console.error('Page-load metric could not be recorded'));
+   if(ctx)ctx.waitUntil(recorded);else await recorded;
+  }
+  return response;
+ }
  try{
+  if(path==='/api/email/unsubscribe'){
+   const url=new URL(request.url),job=url.searchParams.get('job')||'',sig=url.searchParams.get('sig')||'';
+   if(!await validUnsubscribe(job,sig,env.SUPABASE_SECRET_KEY))throw new AccessError('Invalid unsubscribe link.',400);
+   if(request.method!=='GET'&&request.method!=='POST')throw new AccessError('Method not allowed.',405);
+   if(request.method==='POST'){
+    const origin=request.headers.get('origin');if((origin&&origin!==url.origin)||request.headers.get('sec-fetch-site')==='cross-site')throw new AccessError('Request origin does not match.',403);
+    await rpc(env,'prod_email_unsubscribe',{p_job:job});
+   }
+   return new Response(unsubscribePage(request.method==='POST'),{headers:{'Content-Type':'text/html; charset=utf-8','Cache-Control':'no-store','Referrer-Policy':'no-referrer','Content-Security-Policy':"default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'"}});
+  }
   const smsRpc=(n:string,d:Record<string,unknown>)=>rpc(env,n,d);
   if(path==='/api/sms/inbound'||path==='/api/sms/status')return await smsWebhook(request,env,smsRpc);
   if(path==='/api/phone/send-code'&&request.method==='POST'){
@@ -252,8 +270,9 @@ export default {async scheduled(_controller:unknown,env:Env,ctx:{waitUntil:(p:Pr
    throw new AccessError('Database request failed. Check that the setup SQL has been run.',502);
   }
   return json(result,request.method==='POST'?201:200);
- }catch(e){return json({error:e instanceof AccessError?e.message:'Service temporarily unavailable. Please retry.'},e instanceof AccessError?e.status:503);}
+ }catch(e){if(env.REPORTS_ENABLED==='true'&&(!(e instanceof AccessError)||e.status>=500)){const recorded=rpc(env,'prod_metric',{p_metric:'api_errors'}).catch(()=>console.error('Error metric could not be recorded'));if(ctx)ctx.waitUntil(recorded);else await recorded;}return json({error:e instanceof AccessError?e.message:'Service temporarily unavailable. Please retry.'},e instanceof AccessError?e.status:503);}
 }};
+
 
 
 
